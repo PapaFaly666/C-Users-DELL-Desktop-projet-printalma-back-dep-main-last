@@ -8,7 +8,7 @@ async function activateAdmin() {
 
     // Trouver le compte superadmin@printalma.com
     const user = await prisma.user.findUnique({
-      where: { email: 'superadmin@printalma.com' }
+      where: { email: 'superadmin@printalma.com' } 
     });
 
     if (!user) {
