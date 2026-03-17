@@ -6,6 +6,14 @@ import cookieParser from 'cookie-parser';
 import * as bodyParser from 'body-parser';
 import { v2 as cloudinary } from 'cloudinary';
 
+// Capturer les erreurs non gérées pour éviter les crashes silencieux
+process.on('uncaughtException', (err) => {
+  console.error('💥 Uncaught Exception:', err.message, err.stack);
+});
+process.on('unhandledRejection', (reason: any) => {
+  console.error('💥 Unhandled Rejection:', reason?.message || reason);
+});
+
 async function bootstrap() {
   // Initialize Cloudinary configuration globally
   cloudinary.config({

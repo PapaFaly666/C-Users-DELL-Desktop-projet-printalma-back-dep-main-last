@@ -32,6 +32,7 @@ export class PrismaService
   }
 
   async onModuleInit() {
+    if (this.isConnected) return; // évite les connexions multiples
     await this.connectWithRetry();
   }
 
@@ -78,25 +79,9 @@ export class PrismaService
     }
   }
 
-  // Configuration PostgreSQL optimisée
+  // Configuration PostgreSQL optimisée (uniquement les paramètres autorisés sur Neon)
   private async optimizePostgreSQL(): Promise<void> {
-    try {
-      // Timeouts optimisés
-      await this.$executeRaw`SET statement_timeout = '60000'`; // 60 secondes
-      await this.$executeRaw`SET lock_timeout = '15000'`; // 15 secondes pour les locks
-      await this.$executeRaw`SET idle_in_transaction_session_timeout = '120000'`; // 2 minutes
-      
-      // Configuration pour éviter les deadlocks
-      await this.$executeRaw`SET deadlock_timeout = '1000'`; // 1 seconde
-      
-      // Optimisations mémoire
-      await this.$executeRaw`SET work_mem = '64MB'`; // Plus de mémoire pour les opérations
-      await this.$executeRaw`SET maintenance_work_mem = '256MB'`; // Pour les index
-      
-      this.logger.log('⚙️ PostgreSQL optimizations applied');
-    } catch (error) {
-      this.logger.warn(`⚠️ Could not apply PostgreSQL optimizations: ${error.message}`);
-    }
+    // Neon ne permet pas SET deadlock_timeout, work_mem, etc. — on skip silencieusement
   }
 
   // Transaction super-robuste avec retry intelligent
