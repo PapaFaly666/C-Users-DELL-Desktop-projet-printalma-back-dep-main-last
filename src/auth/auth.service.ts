@@ -145,18 +145,28 @@ export class AuthService {
         const roleToCheck = user.customRole?.slug?.toUpperCase() || user.role;
         if (this.otpService.shouldUseOTP(roleToCheck)) {
             // Générer et envoyer l'OTP
-            const code = await this.otpService.createOTP(
-                user.id,
-                loginDto.ipAddress,
-                loginDto.userAgent
-            );
+            console.log(`[LOGIN] Generating OTP for user ${user.id} (${user.email}), role: ${roleToCheck}`);
+            let code: string;
+            try {
+                code = await this.otpService.createOTP(
+                    user.id,
+                    loginDto.ipAddress,
+                    loginDto.userAgent
+                );
+                console.log(`[LOGIN] OTP created successfully for user ${user.id}`);
+            } catch (otpError) {
+                console.error('[LOGIN] ERROR creating OTP in DB:', otpError?.message, otpError?.stack);
+                throw new BadRequestException('Erreur interne lors de la génération du code OTP. Contactez le support.');
+            }
 
             // Envoyer l'OTP par email
+            console.log(`[LOGIN] Sending OTP email to ${user.email}, SMTP_HOST=${process.env.SMTP_HOST || 'NOT SET'}, SMTP_USER=${process.env.SMTP_USER || 'NOT SET'}`);
             try {
                 await this.mailService.sendLoginOTP(user.email, user.firstName, code);
+                console.log(`[LOGIN] OTP email sent successfully to ${user.email}`);
             } catch (mailError) {
-                console.error('Erreur envoi OTP email:', mailError?.message || mailError);
-                throw new Error('Impossible d\'envoyer le code de vérification. Vérifiez la configuration SMTP.');
+                console.error('[LOGIN] ERROR sending OTP email:', mailError?.message, mailError?.stack);
+                throw new BadRequestException(`Impossible d'envoyer le code OTP par email. SMTP: ${process.env.SMTP_HOST || 'non configuré'}. Erreur: ${mailError?.message || mailError}`);
             }
 
             return {
