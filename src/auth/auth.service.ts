@@ -152,7 +152,12 @@ export class AuthService {
             );
 
             // Envoyer l'OTP par email
-            await this.mailService.sendLoginOTP(user.email, user.firstName, code);
+            try {
+                await this.mailService.sendLoginOTP(user.email, user.firstName, code);
+            } catch (mailError) {
+                console.error('Erreur envoi OTP email:', mailError?.message || mailError);
+                throw new Error('Impossible d\'envoyer le code de vérification. Vérifiez la configuration SMTP.');
+            }
 
             return {
                 otpRequired: true,
