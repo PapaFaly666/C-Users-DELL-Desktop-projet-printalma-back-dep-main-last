@@ -11,7 +11,7 @@ async function activateAdmin() {
       where: { email: 'superadmin@printalma.com' } 
     });
 
-    if (!user) {
+    if (!user) {  
       console.log('❌ Utilisateur superadmin@printalma.com non trouvé');
       return;
     }
