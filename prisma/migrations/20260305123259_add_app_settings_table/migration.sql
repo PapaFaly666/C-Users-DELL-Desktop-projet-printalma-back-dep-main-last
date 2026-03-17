@@ -1,5 +1,5 @@
--- CreateTable
-CREATE TABLE "app_settings" (
+-- CreateTable (safe)
+CREATE TABLE IF NOT EXISTS "app_settings" (
     "id" SERIAL NOT NULL,
     "key" VARCHAR(100) NOT NULL,
     "value" TEXT,
@@ -12,30 +12,31 @@ CREATE TABLE "app_settings" (
     CONSTRAINT "app_settings_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
-CREATE UNIQUE INDEX "app_settings_key_key" ON "app_settings"("key");
+-- CreateIndex (safe)
+CREATE UNIQUE INDEX IF NOT EXISTS "app_settings_key_key" ON "app_settings"("key");
+CREATE INDEX IF NOT EXISTS "app_settings_key_idx" ON "app_settings"("key");
+CREATE INDEX IF NOT EXISTS "app_settings_category_idx" ON "app_settings"("category");
 
--- CreateIndex
-CREATE INDEX "app_settings_key_idx" ON "app_settings"("key");
+-- AddForeignKey (safe) - table "User" avec majuscule
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'app_settings_updated_by_fkey') THEN
+    ALTER TABLE "app_settings" ADD CONSTRAINT "app_settings_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
--- CreateIndex
-CREATE INDEX "app_settings_category_idx" ON "app_settings"("category");
-
--- AddForeignKey
-ALTER TABLE "app_settings" ADD CONSTRAINT "app_settings_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- Insert default values
-INSERT INTO "app_settings" ("key", "value", "dataType", "category") VALUES
-('appName', 'PrintAlma', 'string', 'company'),
-('contactEmail', 'contact@printalma.com', 'string', 'company'),
-('supportEmail', 'support@printalma.com', 'string', 'company'),
-('contactPhone', '+221 77 123 45 67', 'string', 'company'),
-('companyAddress', 'Dakar, Sénégal', 'string', 'company'),
-('websiteUrl', 'https://printalma.com', 'string', 'company'),
-('vendorRegistrationEnabled', 'true', 'boolean', 'vendors'),
-('emailNotificationsEnabled', 'true', 'boolean', 'email'),
-('defaultVendorCommission', '15', 'number', 'vendors'),
-('minWithdrawalAmount', '5000', 'number', 'vendors'),
-('currency', 'XOF', 'string', 'general'),
-('maintenanceMode', 'false', 'boolean', 'maintenance'),
-('maintenanceMessage', 'Le site est en maintenance. Nous revenons bientôt.', 'string', 'maintenance');
+-- Insert default values (safe)
+INSERT INTO "app_settings" ("key", "value", "dataType", "category", "updated_at") VALUES
+('appName', 'PrintAlma', 'string', 'company', NOW()),
+('contactEmail', 'contact@printalma.com', 'string', 'company', NOW()),
+('supportEmail', 'support@printalma.com', 'string', 'company', NOW()),
+('contactPhone', '+221 77 123 45 67', 'string', 'company', NOW()),
+('companyAddress', 'Dakar, Sénégal', 'string', 'company', NOW()),
+('websiteUrl', 'https://printalma.com', 'string', 'company', NOW()),
+('vendorRegistrationEnabled', 'true', 'boolean', 'vendors', NOW()),
+('emailNotificationsEnabled', 'true', 'boolean', 'email', NOW()),
+('defaultVendorCommission', '15', 'number', 'vendors', NOW()),
+('minWithdrawalAmount', '5000', 'number', 'vendors', NOW()),
+('currency', 'XOF', 'string', 'general', NOW()),
+('maintenanceMode', 'false', 'boolean', 'maintenance', NOW()),
+('maintenanceMessage', 'Le site est en maintenance. Nous revenons bientôt.', 'string', 'maintenance', NOW())
+ON CONFLICT ("key") DO NOTHING;

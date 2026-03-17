@@ -1,8 +1,12 @@
--- CreateEnum
-CREATE TYPE "DesignUsagePaymentStatus" AS ENUM ('PENDING', 'CONFIRMED', 'READY_FOR_PAYOUT', 'PAID', 'CANCELLED');
+-- CreateEnum (safe)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'DesignUsagePaymentStatus') THEN
+    CREATE TYPE "DesignUsagePaymentStatus" AS ENUM ('PENDING', 'CONFIRMED', 'READY_FOR_PAYOUT', 'PAID', 'CANCELLED');
+  END IF;
+END $$;
 
--- CreateTable
-CREATE TABLE "design_usages" (
+-- CreateTable (safe - skipped if already exists from 20251214)
+CREATE TABLE IF NOT EXISTS "design_usages" (
     "id" SERIAL NOT NULL,
     "design_id" INTEGER NOT NULL,
     "design_name" VARCHAR(255) NOT NULL,
@@ -31,26 +35,30 @@ CREATE TABLE "design_usages" (
     CONSTRAINT "design_usages_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
-CREATE INDEX "idx_vendor_payment_status" ON "design_usages"("vendor_id", "payment_status");
+-- CreateIndex (safe)
+CREATE INDEX IF NOT EXISTS "idx_vendor_payment_status" ON "design_usages"("vendor_id", "payment_status");
+CREATE INDEX IF NOT EXISTS "idx_order_id" ON "design_usages"("order_id");
+CREATE INDEX IF NOT EXISTS "idx_design_id" ON "design_usages"("design_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "unique_design_order_item" ON "design_usages"("design_id", "order_item_id");
 
--- CreateIndex
-CREATE INDEX "idx_order_id" ON "design_usages"("order_id");
-
--- CreateIndex
-CREATE INDEX "idx_design_id" ON "design_usages"("design_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "unique_design_order_item" ON "design_usages"("design_id", "order_item_id");
-
--- AddForeignKey
-ALTER TABLE "design_usages" ADD CONSTRAINT "design_usages_design_id_fkey" FOREIGN KEY ("design_id") REFERENCES "designs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "design_usages" ADD CONSTRAINT "design_usages_vendor_id_fkey" FOREIGN KEY ("vendor_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "design_usages" ADD CONSTRAINT "design_usages_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "orders"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "design_usages" ADD CONSTRAINT "design_usages_order_item_id_fkey" FOREIGN KEY ("order_item_id") REFERENCES "order_items"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- AddForeignKey (safe) - noms de tables avec majuscules
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'design_usages_design_id_fkey') THEN
+    ALTER TABLE "design_usages" ADD CONSTRAINT "design_usages_design_id_fkey" FOREIGN KEY ("design_id") REFERENCES "Design"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'design_usages_vendor_id_fkey') THEN
+    ALTER TABLE "design_usages" ADD CONSTRAINT "design_usages_vendor_id_fkey" FOREIGN KEY ("vendor_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'design_usages_order_id_fkey') THEN
+    ALTER TABLE "design_usages" ADD CONSTRAINT "design_usages_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'design_usages_order_item_id_fkey') THEN
+    ALTER TABLE "design_usages" ADD CONSTRAINT "design_usages_order_item_id_fkey" FOREIGN KEY ("order_item_id") REFERENCES "OrderItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
