@@ -6,7 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "npx prisma generate && npx prisma migrate resolve --applied 20251214212855_add_design_revenue_system || true && npx prisma migrate deploy && nest build",
+    "build": "npx prisma generate && npx prisma migrate resolve --applied 20251202_add_order_commission_fields || true && npx prisma migrate resolve --applied 20251214212855_add_design_revenue_system || true && npx prisma migrate resolve --applied 20251215_add_design_usage_tracking || true && npx prisma migrate resolve --applied 20260211_add_phone_security_system || true && npx prisma migrate resolve --applied 20260305123259_add_app_settings_table || true && npx prisma migrate deploy && nest build",
     "start:compiled": "npm run build && node dist/main",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "cross-env TS_NODE_TRANSPILE_ONLY=true node --max-old-space-size=512 -r ts-node/register src/main.ts",
