@@ -8,7 +8,7 @@ import { CreateStockMovementDto } from './dto/create-stock-movement.dto';
 import { StockHistoryQueryDto } from './dto/stock-history-query.dto';
 import { CloudinaryService } from '../core/cloudinary/cloudinary.service';
 import { PrismaService } from '../prisma.service';
-import { PublicationStatus, CoordinateType as PrismaCoordinateType, ProductGenre, StockMovementType } from '@prisma/client';
+import { PublicationStatus, CoordinateType as PrismaCoordinateType, StockMovementType } from '@prisma/client';
 import { DelimitationService } from '../delimitation/delimitation.service';
 import { MailService } from '../core/mail/mail.service';
 
@@ -184,12 +184,28 @@ export class ProductService {
     // ✅ Valider la cohérence de la hiérarchie Category → SubCategory → Variation
     await this.validateCategoryHierarchy(dto.categoryId, dto.subCategoryId, dto.variationId);
 
-    // 1. Create file mapping
+    // 1. Create file mapping (color variation images vs material images)
     const fileMap = new Map<string, Express.Multer.File>();
+    const materialFiles: Express.Multer.File[] = [];
     files.forEach((file) => {
-      const fileId = file.fieldname.replace('file_', '');
-      fileMap.set(fileId, file);
+      if (file.fieldname.startsWith('material_image_')) {
+        materialFiles.push(file);
+      } else {
+        const fileId = file.fieldname.replace('file_', '');
+        fileMap.set(fileId, file);
+      }
     });
+
+    // 1.5 Upload material images to Cloudinary
+    const uploadedMaterialImages: { url: string; publicId: string }[] = [];
+    for (const matFile of materialFiles) {
+      try {
+        const result = await this.cloudinaryService.uploadImage(matFile);
+        uploadedMaterialImages.push({ url: result.secure_url, publicId: result.public_id });
+      } catch (err) {
+        console.warn('⚠️ Erreur upload image matière:', err?.message);
+      }
+    }
 
     // 2. Upload all images to Cloudinary BEFORE starting transaction
     const uploadedImages = new Map<string, any>();
@@ -240,7 +256,7 @@ export class ProductService {
         stock: isProductWithoutStock ? 0 : (dto.stock ?? 0), // 0 pour AUTOCOLLANT/TABLEAU, sinon la valeur du DTO
         status: dto.status === 'published' ? PublicationStatus.PUBLISHED : PublicationStatus.DRAFT,
         isReadyProduct: isReadyProduct, // ✅ AJOUTER LE CHAMP isReadyProduct
-        genre: genreValue as ProductGenre, // ✅ AJOUTER LE CHAMP GENRE
+        genre: genreValue,
         requiresStock: requiresStockValue, // ✅ AJOUTER LE CHAMP requiresStock
         isValidated: true, // ✅ MOCKUPS CRÉÉS PAR ADMIN SONT VALIDÉS PAR DÉFAUT
         // ✅ Hiérarchie de catégories à 3 niveaux
@@ -251,8 +267,12 @@ export class ProductService {
         useGlobalPricing: dto.useGlobalPricing || false,
         globalCostPrice: dto.globalCostPrice || 0,
         globalSuggestedPrice: dto.globalSuggestedPrice || 0,
+        // 🆕 Matière & Qualité
+        materialName: dto.materialName || null,
+        materialDescription: dto.materialDescription || null,
+        materialImages: uploadedMaterialImages.length > 0 ? uploadedMaterialImages : [],
       };
-      
+
       console.log('🔍 [BACKEND] create method - productData avant création:', JSON.stringify(productData, null, 2));
       
       const product = await tx.product.create({
@@ -803,6 +823,7 @@ export class ProductService {
         sizes: true,
         stocks: true, // 📦 Inclure les stocks
         sizePrices: true, // 🆕 Inclure les prix par taille
+        category: true, // ✅ Inclure la catégorie principale
         subCategory: true, // ✅ Inclure la sous-catégorie
         variation: true, // ✅ Inclure la variation
         colorVariations: {
@@ -1720,12 +1741,8 @@ export class ProductService {
       }
     }
 
-    // 🆕 VALIDATION DES PRIX PAR TAILLE
-    if (updateDto.sizes && updateDto.sizes.length > 0) {
-      if (!updateDto.sizePricing || updateDto.sizePricing.length === 0) {
-        throw new BadRequestException('Les prix par taille sont requis quand des tailles sont définies');
-      }
-
+    // 🆕 VALIDATION DES PRIX PAR TAILLE (uniquement si sizePricing est explicitement fourni)
+    if (updateDto.sizes && updateDto.sizes.length > 0 && updateDto.sizePricing && updateDto.sizePricing.length > 0) {
       // Vérifier que chaque taille a un prix de vente suggéré > 0
       const sizesWithoutPrice = updateDto.sizes.filter(size =>
         !updateDto.sizePricing!.find(p => p.size === size && p.suggestedPrice > 0)
@@ -1778,11 +1795,19 @@ export class ProductService {
     if (updateDto.stock !== undefined && data.requiresStock !== false) data.stock = updateDto.stock;
     if (updateDto.status !== undefined) data.status = updateDto.status;
     if (updateDto.genre !== undefined) data.genre = updateDto.genre;
+    // Hiérarchie catégories (champs directs)
+    if (updateDto.categoryId !== undefined && updateDto.categoryId !== null) data.categoryId = Number(updateDto.categoryId);
+    if (updateDto.subCategoryId !== undefined && updateDto.subCategoryId !== null) data.subCategoryId = Number(updateDto.subCategoryId);
+    if (updateDto.variationId !== undefined && updateDto.variationId !== null) data.variationId = Number(updateDto.variationId);
     // 🆕 Champs pour la tarification par taille
     if (updateDto.useGlobalPricing !== undefined) data.useGlobalPricing = updateDto.useGlobalPricing;
     if (updateDto.globalCostPrice !== undefined) data.globalCostPrice = updateDto.globalCostPrice;
     if (updateDto.globalSuggestedPrice !== undefined) data.globalSuggestedPrice = updateDto.globalSuggestedPrice;
-    
+    // 🆕 Matière & Qualité
+    if (updateDto.materialName !== undefined) data.materialName = updateDto.materialName;
+    if (updateDto.materialDescription !== undefined) data.materialDescription = updateDto.materialDescription;
+    if (updateDto.materialImages !== undefined) data.materialImages = updateDto.materialImages;
+
     console.log('🔍 [BACKEND] updateProduct - data avant mise à jour:', JSON.stringify(data, null, 2));
 
     // 3. Mettre à jour le produit principal
@@ -1821,22 +1846,20 @@ export class ProductService {
     console.log('   - genre:', updatedProduct.genre);
     console.log('   - status:', updatedProduct.status);
 
-    // 4. Mettre à jour les catégories si fourni
-    if (updateDto.categories) {
-      // Suppression des anciennes associations et ajout des nouvelles
-      await this.prisma.categoryToProduct.deleteMany({
-        where: { B: id },
-      });
+    // 4. Mettre à jour les catégories si fourni (IDs numériques uniquement, ignorer les strings)
+    if (updateDto.categories && Array.isArray(updateDto.categories)) {
+      const numericCategoryIds = updateDto.categories
+        .map((c: any) => Number(c))
+        .filter((n: number) => !isNaN(n) && n > 0);
 
-      if (updateDto.categories.length > 0) {
+      if (numericCategoryIds.length > 0) {
+        await this.prisma.categoryToProduct.deleteMany({ where: { B: id } });
         await this.prisma.categoryToProduct.createMany({
-          data: updateDto.categories.map((categoryId: number) => ({
-            A: Number(categoryId),
-            B: id
-          })),
+          data: numericCategoryIds.map((categoryId: number) => ({ A: categoryId, B: id })),
           skipDuplicates: true,
         });
       }
+      // Si categories contient des strings (noms), on ignore - categoryId/subCategoryId sont déjà mis à jour
     }
 
     // 5. Mettre à jour les tailles si fourni
@@ -2010,7 +2033,7 @@ export class ProductService {
                 });
                 imageId = createdImg.id;
               } else {
-                // Mettre à jour l'image existante
+                // Mettre à jour l'image existante (+ déplacer vers la bonne couleur si nécessaire)
                 await this.prisma.productImage.update({
                   where: { id: imageId },
                   data: {
@@ -2018,7 +2041,8 @@ export class ProductService {
                     url: img.url,
                     publicId: img.publicId,
                     naturalWidth: img.naturalWidth,
-                    naturalHeight: img.naturalHeight
+                    naturalHeight: img.naturalHeight,
+                    colorVariationId: colorVarId  // ← assure que l'image est sous la bonne couleur
                   }
                 });
               }
@@ -2072,13 +2096,17 @@ export class ProductService {
       }
     }
 
-    // 7. Retourner le produit mis à jour
+    // 7. Retourner le produit mis à jour (même format que findOne, avec stocks)
     const finalProduct = await this.prisma.product.findUnique({
       where: { id },
       include: {
         CategoryToProduct: { include: { categories: true } },
         sizes: true,
-        sizePrices: true, // 🆕 Inclure les prix par taille
+        stocks: true,
+        sizePrices: true,
+        category: true,
+        subCategory: true,
+        variation: true,
         colorVariations: {
           include: {
             images: {
@@ -2090,13 +2118,21 @@ export class ProductService {
         },
       },
     });
-    
+
+    // Transformer les stocks par couleur (même format que findOne)
+    const transformedColorVariations = finalProduct.colorVariations.map(colorVar => {
+      const colorStocks = (finalProduct.stocks || [])
+        .filter(s => s.colorId === colorVar.id)
+        .map(s => ({ sizeName: s.sizeName, stock: s.stock }));
+      return { ...colorVar, stocks: colorStocks };
+    });
+
     console.log('🔍 [BACKEND] updateProduct - Produit final retourné:');
     console.log('   - suggestedPrice:', finalProduct.suggestedPrice);
     console.log('   - genre:', finalProduct.genre);
     console.log('   - status:', finalProduct.status);
-    
-    return finalProduct;
+
+    return { ...finalProduct, colorVariations: transformedColorVariations };
   }
 
   async uploadColorImage(productId: number, colorId: number, image: Express.Multer.File) {
@@ -2338,7 +2374,7 @@ export class ProductService {
           stock: isProductWithoutStock ? 0 : (dto.stock ?? 0), // 0 pour AUTOCOLLANT/TABLEAU, sinon la valeur du DTO
           status: dto.status === 'published' ? PublicationStatus.PUBLISHED : PublicationStatus.DRAFT,
           isReadyProduct: isReadyProduct, // ✅ UTILISER LA VALEUR DU DTO
-          genre: genreValue as ProductGenre, // ✅ AJOUTER LE CHAMP GENRE
+          genre: genreValue,
           requiresStock: requiresStockValue, // ✅ AJOUTER LE CHAMP requiresStock
           isValidated: true, // ✅ PRODUITS PRÊTS CRÉÉS PAR ADMIN SONT VALIDÉS PAR DÉFAUT
           // 🆕 Champs pour la tarification par taille
@@ -2554,12 +2590,8 @@ export class ProductService {
       updateDto.requiresStock = false;
     }
 
-    // 🆕 VALIDATION DES PRIX PAR TAILLE
-    if (updateDto.sizes && updateDto.sizes.length > 0) {
-      if (!updateDto.sizePricing || updateDto.sizePricing.length === 0) {
-        throw new BadRequestException('Les prix par taille sont requis quand des tailles sont définies');
-      }
-
+    // 🆕 VALIDATION DES PRIX PAR TAILLE (uniquement si sizePricing est explicitement fourni)
+    if (updateDto.sizes && updateDto.sizes.length > 0 && updateDto.sizePricing && updateDto.sizePricing.length > 0) {
       // Vérifier que chaque taille a un prix de vente suggéré > 0
       const sizesWithoutPrice = updateDto.sizes.filter(size =>
         !updateDto.sizePricing!.find(p => p.size === size && p.suggestedPrice > 0)

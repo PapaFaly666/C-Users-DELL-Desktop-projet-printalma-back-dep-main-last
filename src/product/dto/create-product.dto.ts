@@ -406,9 +406,7 @@ export class CreateProductDto {
     required: false
   })
   @IsOptional()
-  @IsEnum(['HOMME', 'FEMME', 'BEBE', 'UNISEXE', 'AUTOCOLLANT', 'TABLEAU'], {
-    message: 'Le genre doit être "HOMME", "FEMME", "BEBE", "UNISEXE", "AUTOCOLLANT" ou "TABLEAU"'
-  })
+  @IsString()
   genre?: string = 'UNISEXE';
 
   @ApiProperty({
@@ -430,6 +428,16 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => ColorVariationDto)
   colorVariations: ColorVariationDto[];
+
+  @ApiProperty({ description: 'Composition / Matière (ex: 100% coton)', required: false })
+  @IsOptional()
+  @IsString()
+  materialName?: string;
+
+  @ApiProperty({ description: 'Description qualité (ex: tissu premium)', required: false })
+  @IsOptional()
+  @IsString()
+  materialDescription?: string;
 }
 
 // Rétrocompatibilité - les anciens DTOs sont conservés mais dépréciés

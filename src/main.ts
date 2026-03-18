@@ -5,6 +5,23 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import * as bodyParser from 'body-parser';
 import { v2 as cloudinary } from 'cloudinary';
+import { PrismaClient } from '@prisma/client';
+
+async function runMigrations() {
+  const prisma = new PrismaClient();
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "material_name" VARCHAR(255)`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "material_description" TEXT`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "material_images" JSONB DEFAULT '[]'`);
+    console.log('✅ Material fields migration applied');
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "site_settings" ("key" VARCHAR(100) PRIMARY KEY, "value" TEXT NOT NULL, "updated_at" TIMESTAMP DEFAULT NOW())`);
+    console.log('✅ SiteSettings table migration applied');
+  } catch (e) {
+    console.warn('⚠️ Material migration warning:', e.message);
+  } finally {
+    await prisma.$disconnect();
+  }
+}
 
 // Capturer les erreurs non gérées pour éviter les crashes silencieux
 process.on('uncaughtException', (err) => {
@@ -15,6 +32,8 @@ process.on('unhandledRejection', (reason: any) => {
 });
 
 async function bootstrap() {
+  await runMigrations();
+
   // Initialize Cloudinary configuration globally
   cloudinary.config({
     cloud_name: 'dsxab4qnu',
@@ -88,7 +107,7 @@ async function bootstrap() {
     ].filter(Boolean),
     credentials: true, // Important pour les cookies
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'x-user-id', 'x-user-role', 'x-user-email'],
   });
   
   const port = process.env.PORT || 3004;

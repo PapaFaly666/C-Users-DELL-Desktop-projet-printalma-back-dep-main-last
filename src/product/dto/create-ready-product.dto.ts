@@ -1,9 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, IsNumber, IsPositive, IsArray, IsNotEmpty, ArrayMinSize, IsInt, IsEnum, IsOptional, ValidateNested, MinLength, MaxLength, Min, IsBoolean } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { ProductGenre } from '@prisma/client';
-
-// Enum pour le genre des produits prêts (utilise l'enum Prisma)
+// Enum conservé pour Swagger/documentation uniquement
 export enum ReadyProductGenre {
   HOMME = 'HOMME',
   FEMME = 'FEMME',
@@ -250,11 +248,9 @@ export class CreateReadyProductDto {
     example: ReadyProductGenre.HOMME,
     required: false
   })
-  @IsEnum(ReadyProductGenre, {
-    message: 'Le genre doit être "HOMME", "FEMME", "BEBE", "UNISEXE", "AUTOCOLLANT" ou "TABLEAU"'
-  })
+  @IsString()
   @IsOptional()
-  genre?: ReadyProductGenre;
+  genre?: string;
 
   @ApiProperty({
     description: 'Indique si le produit nécessite une gestion de stock',

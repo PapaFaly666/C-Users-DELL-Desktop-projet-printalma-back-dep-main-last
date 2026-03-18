@@ -49,6 +49,7 @@ import { OrangeMoneyModule } from './orange-money/orange-money.module';
 import { AdminSettingsModule } from './admin-settings/admin-settings.module';
 import { VendorStatsModule } from './vendor-stats/vendor-stats.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { FontsModule } from './fonts/fonts.module';
 
 @Module({
   imports: [
@@ -99,6 +100,7 @@ import { PermissionsModule } from './permissions/permissions.module';
     AdminSettingsModule, // Module des paramètres administrateur
     VendorStatsModule, // Module des statistiques vendeur
     PermissionsModule, // Module de gestion des permissions et rôles
+    FontsModule,
   ],
   controllers: [AppController, SizeController],
   providers: [AppService, PrismaService, SizeService],

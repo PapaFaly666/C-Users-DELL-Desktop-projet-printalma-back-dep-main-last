@@ -1,38 +1,61 @@
 import { Controller, Get, HttpCode, HttpStatus } from '@nestjs/common';
 import { HomeContentService } from './home-content.service';
+import { AllSectionTexts, PersonalizationContent, CarouselSlide, GenreOption, CarouselSettings } from './home-content.types';
 
-/**
- * Contrôleur public pour le contenu de la page d'accueil
- * Utilisé par le frontend pour afficher les sections
- */
 @Controller('public/content')
 export class PublicContentController {
   constructor(private readonly homeContentService: HomeContentService) {}
 
-  /**
-   * Health check endpoint
-   */
   @Get('health')
   @HttpCode(HttpStatus.OK)
   async health() {
-    return {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-    };
+    return { status: 'ok', timestamp: new Date().toISOString() };
   }
 
-  /**
-   * Récupérer le contenu public de la page d'accueil
-   * GET /api/public/content
-   *
-   * Retourne les 3 sections avec leurs items respectifs:
-   * - designs: 6 items
-   * - influencers: 5 items
-   * - merchandising: 6 items
-   */
+  /** GET /public/content */
   @Get()
   @HttpCode(HttpStatus.OK)
   async getPublicContent() {
     return this.homeContentService.getContent();
+  }
+
+  /** GET /public/content/section-texts */
+  @Get('section-texts')
+  @HttpCode(HttpStatus.OK)
+  async getSectionTexts(): Promise<{ success: boolean; data: AllSectionTexts }> {
+    const data = await this.homeContentService.getSectionTexts();
+    return { success: true, data };
+  }
+
+  /** GET /public/content/personalization */
+  @Get('personalization')
+  @HttpCode(HttpStatus.OK)
+  async getPersonalization(): Promise<{ success: boolean; data: PersonalizationContent }> {
+    const data = await this.homeContentService.getPersonalizationContent();
+    return { success: true, data };
+  }
+
+  /** GET /public/content/carousel */
+  @Get('carousel')
+  @HttpCode(HttpStatus.OK)
+  async getCarousel(): Promise<{ success: boolean; data: CarouselSlide[] }> {
+    const data = await this.homeContentService.getCarouselSlides(false);
+    return { success: true, data };
+  }
+
+  /** GET /public/content/genre-options */
+  @Get('genre-options')
+  @HttpCode(HttpStatus.OK)
+  async getGenreOptions(): Promise<{ success: boolean; data: GenreOption[] }> {
+    const data = await this.homeContentService.getGenreOptions();
+    return { success: true, data };
+  }
+
+  /** GET /public/content/carousel/settings */
+  @Get('carousel/settings')
+  @HttpCode(HttpStatus.OK)
+  async getCarouselSettings(): Promise<{ success: boolean; data: CarouselSettings }> {
+    const data = await this.homeContentService.getCarouselSettings();
+    return { success: true, data };
   }
 }

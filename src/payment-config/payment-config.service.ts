@@ -394,9 +394,22 @@ export class PaymentConfigService {
     });
 
     if (!existing) {
+      // For CASH_ON_DELIVERY, auto-create if it doesn't exist
+      if (provider === 'CASH_ON_DELIVERY') {
+        await this.upsertCodStatus(isActive);
+        return { provider, isActive, message: `${provider} ${isActive ? 'activé' : 'désactivé'} avec succès` };
+      }
       throw new NotFoundException(
         `Configuration non trouvée pour ${provider}`,
       );
+    }
+
+    // Enforce at least one active payment method
+    if (!isActive) {
+      const activeCount = await this.prisma.paymentConfig.count({ where: { isActive: true } });
+      if (activeCount <= 1) {
+        throw new BadRequestException('Au moins un moyen de paiement doit rester actif.');
+      }
     }
 
     const updated = await this.prisma.paymentConfig.update({

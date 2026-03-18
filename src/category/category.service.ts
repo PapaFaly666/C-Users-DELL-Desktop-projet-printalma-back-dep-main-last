@@ -549,10 +549,17 @@ export class CategoryService {
             throw new NotFoundException(`Variation avec ID ${id} non trouvée`);
         }
 
-        const productsCount = await this.prisma.product.count({
+        // Produits liés directement à cette variation
+        const directProductsCount = await this.prisma.product.count({
             where: { variationId: id, isDelete: false }
         });
 
+        // Produits liés à la sous-catégorie parente (impactés si la variation est supprimée)
+        const subCategoryProductsCount = await this.prisma.product.count({
+            where: { subCategoryId: variation.subCategoryId, isDelete: false }
+        });
+
+        const productsCount = directProductsCount + subCategoryProductsCount;
         const canDelete = productsCount === 0;
 
         return {
@@ -564,11 +571,14 @@ export class CategoryService {
                 subCategoryName: variation.subCategory.name,
                 categoryName: variation.subCategory.category.name,
                 blockers: {
-                    productsCount
+                    directProductsCount,
+                    subCategoryProductsCount,
+                    productsCount,
+                    total: productsCount
                 },
                 message: canDelete
                     ? 'Cette variation peut être supprimée'
-                    : `Cette variation ne peut pas être supprimée car ${productsCount} produit(s) l'utilise(nt)`
+                    : `Cette variation ne peut pas être supprimée car ${productsCount} produit(s) seraient impactés`
             }
         };
     }
