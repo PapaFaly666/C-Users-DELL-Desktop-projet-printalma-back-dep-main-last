@@ -11,13 +11,22 @@ export enum VendeurType {
 
 @Injectable()
 export class MailService {
-  private readonly resend = new Resend(process.env.RESEND_API_KEY);
+  private resendClient: Resend | null = null;
   private readonly fromEmail = process.env.RESEND_FROM_EMAIL || 'PrintAlma <onboarding@resend.dev>';
 
   constructor() {}
 
+  private getResend(): Resend {
+    if (!this.resendClient) {
+      const apiKey = process.env.RESEND_API_KEY;
+      if (!apiKey) throw new Error('RESEND_API_KEY is not set');
+      this.resendClient = new Resend(apiKey);
+    }
+    return this.resendClient;
+  }
+
   private async _send(to: string, subject: string, html: string): Promise<void> {
-    await this.resend.emails.send({
+    await this.getResend().emails.send({
       from: this.fromEmail,
       to,
       subject,
