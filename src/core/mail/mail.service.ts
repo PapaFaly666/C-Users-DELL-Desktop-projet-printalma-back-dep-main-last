@@ -16,7 +16,7 @@ export class MailService {
 
   constructor() {}
 
-  private async sendEmail(to: string, subject: string, html: string): Promise<void> {
+  private async _send(to: string, subject: string, html: string): Promise<void> {
     await this.resend.emails.send({
       from: this.fromEmail,
       to,
@@ -136,7 +136,7 @@ export class MailService {
       </html>
     `;
 
-    await this.sendEmail(to, subject, html);
+    await this._send(to, subject, html);
 
     console.log(`✅ Email OTP envoyé à ${to}`);
   }
@@ -226,7 +226,7 @@ export class MailService {
     `;
 
     try {
-      await this.sendEmail(to, subject, html);
+      await this._send(to, subject, html);
       console.log(`Email envoyé avec succès à ${to} (${formattedVendeurType})`);
     } catch (error) {
       console.error('Erreur lors de l\'envoi de l\'email:', error);
@@ -296,7 +296,7 @@ export class MailService {
     `;
 
     try {
-      await this.sendEmail(to, subject, html);
+      await this._send(to, subject, html);
       console.log(`Email envoyé avec succès à ${to}`);
     } catch (error) {
       console.error('Erreur lors de l\'envoi de l\'email:', error);
@@ -359,7 +359,7 @@ export class MailService {
           html = this.generateGenericTemplate(options.context);
       }
 
-      await this.sendEmail(options.to, options.subject, html);
+      await this._send(options.to, options.subject, html);
 
       console.log(`Email envoyé avec succès à ${options.to} (template: ${options.template})`);
     } catch (error) {
@@ -865,7 +865,7 @@ export class MailService {
     `;
 
     try {
-      await this.sendEmail(to, subject, html);
+      await this._send(to, subject, html);
       console.log(`Email de réinitialisation envoyé avec succès à ${to}`);
     } catch (error) {
       console.error('Erreur lors de l\'envoi de l\'email de réinitialisation:', error);
@@ -942,7 +942,7 @@ export class MailService {
     `;
 
     try {
-      await this.sendEmail(to, subject, html);
+      await this._send(to, subject, html);
       console.log(`Email de confirmation de réinitialisation envoyé à ${to}`);
     } catch (error) {
       console.error('Erreur lors de l\'envoi de l\'email de confirmation:', error);
@@ -985,7 +985,7 @@ export class MailService {
     `;
 
     try {
-      await this.sendEmail(to, subject, html);
+      await this._send(to, subject, html);
     } catch (error) {
       console.error('Erreur lors de l\'envoi de l\'email:', error);
       throw new Error('Impossible d\'envoyer l\'email');
@@ -1469,7 +1469,7 @@ export class MailService {
     `;
 
     try {
-      await this.sendEmail(email, subject, html);
+      await this._send(email, subject, html);
       console.log(`✅ Email de bienvenue envoyé à ${firstName} ${lastName} (${email}) - Boutique: ${shopName}`);
     } catch (error) {
       console.error('❌ Erreur envoi email bienvenue vendeur:', error);
@@ -1519,7 +1519,7 @@ export class MailService {
 
     try {
       // Envoi asynchrone pour la vitesse
-      this.sendEmail(to, subject, html).catch(error => {
+      this._send(to, subject, html).catch(error => {
         console.error('Erreur envoi email activation:', error);
       });
       
@@ -1603,7 +1603,7 @@ export class MailService {
     `;
 
     try {
-      await this.sendEmail(to, subject, html);
+      await this._send(to, subject, html);
       console.log(`📧 Email de notification d'ajout de numéro envoyé à ${to}`);
     } catch (error) {
       console.error('Erreur envoi email notification numéro:', error);
@@ -1654,7 +1654,7 @@ export class MailService {
     `;
 
     try {
-      await this.sendEmail(to, subject, html);
+      await this._send(to, subject, html);
       console.log(`📧 Email de notification de suppression envoyé à ${to}`);
     } catch (error) {
       console.error('Erreur envoi email notification suppression:', error);
@@ -1866,7 +1866,7 @@ export class MailService {
       console.log(`📧 [MailService] Envoi de l'email à ${order.email}...`);
       console.log(`📧 [MailService] Sujet: ${subject}`);
 
-      await this.sendEmail(order.email, subject, html);
+      await this._send(order.email, subject, html);
 
       console.log(`✅ [MailService] Facture envoyée avec succès à ${order.email} pour la commande ${order.orderNumber}`);
     } catch (error) {
@@ -1989,7 +1989,7 @@ export class MailService {
       console.log(`📧 [MailService] Envoi de l'email de personnalisation à ${customizationData.email}...`);
       console.log(`📧 [MailService] Sujet: ${subject}`);
 
-      await this.sendEmail(customizationData.email, subject, html);
+      await this._send(customizationData.email, subject, html);
 
       console.log(`✅ [MailService] Email de personnalisation envoyé avec succès à ${customizationData.email}`);
     } catch (error) {
