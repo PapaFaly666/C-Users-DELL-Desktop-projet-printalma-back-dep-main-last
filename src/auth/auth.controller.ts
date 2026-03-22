@@ -11,6 +11,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { AdminGuard } from '../core/guards/admin.guard';
 import { RequestWithUser } from './jwt.strategy';
 import { RegisterVendorDto } from './dto/register-vendor.dto';
+import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
 import { UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { profilePhotoConfig } from '../../multerConfig';
@@ -334,6 +335,22 @@ export class AuthController {
 	@Post('register-vendeur')
 	async registerVendor(@Body() dto: RegisterVendorDto) {
 		return this.authService.registerVendor(dto);
+	}
+
+	/**
+	 * Endpoint public: Vérification OTP d'email lors de l'inscription vendeur
+	 */
+	@Post('verify-registration-otp')
+	async verifyRegistrationOtp(@Body() dto: VerifyRegistrationOtpDto) {
+		return this.authService.verifyRegistrationOtp(dto);
+	}
+
+	/**
+	 * Endpoint public: Renvoi du code OTP de vérification d'email
+	 */
+	@Post('resend-registration-otp')
+	async resendRegistrationOtp(@Body() body: { userId: number }) {
+		return this.authService.resendRegistrationOtp(body.userId);
 	}
 
 	@Get('activation-status/:email')

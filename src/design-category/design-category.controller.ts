@@ -45,6 +45,15 @@ export class DesignCategoryController {
   constructor(private readonly designCategoryService: DesignCategoryService) {}
 
   /**
+   * 🌐 PUBLIC - Catégories actives liées à au moins un produit vendeur
+   */
+  @Get('active-with-products')
+  @ApiOperation({ summary: 'Catégories actives avec produits vendeur' })
+  async getActiveCategoriesWithProducts() {
+    return this.designCategoryService.getActiveCategoriesWithProducts();
+  }
+
+  /**
    * 🌐 PUBLIC - Récupérer les catégories actives pour les vendeurs
    */
   @Get('active')

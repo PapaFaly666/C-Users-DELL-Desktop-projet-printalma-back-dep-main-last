@@ -1,6 +1,8 @@
 import {
   Controller,
   Get,
+  Post,
+  Body,
   Query,
   Logger,
   ParseIntPipe,
@@ -98,7 +100,7 @@ export class PublicProductsController {
       
       // ✅ PAR DÉFAUT: Afficher les meilleures ventes
       // Seulement si allProducts=true, on affiche tous les produits
-      const shouldShowAllProducts = allProducts === true;
+      const shouldShowAllProducts = allProducts === true || (allProducts as any) === 'true';
       
       if (!shouldShowAllProducts) {
         filters.isBestSeller = true;
@@ -118,18 +120,16 @@ export class PublicProductsController {
       return {
         success: true,
         message: allProducts ? 'Tous les produits récupérés avec succès' : 'Meilleures ventes récupérées avec succès',
-        data: {
-          products: result.products,
-          pagination: result.pagination,
-          type: allProducts ? 'all_products' : 'best_sellers'
-        }
+        data: result.products,
+        pagination: result.pagination,
       };
     } catch (error) {
       this.logger.error('❌ Erreur récupération produits publics:', error);
       return {
         success: false,
         message: 'Erreur lors de la récupération des produits',
-        error: error.message
+        data: [],
+        pagination: { total: 0, limit: 20, offset: 0, hasMore: false },
       };
     }
   }
@@ -591,4 +591,40 @@ export class PublicProductsController {
       throw error;
     }
   }
-} 
+
+  /**
+   * POST /public/search/track — Enregistre ou incrémente un terme de recherche
+   */
+  @Post('search/track')
+  @ApiOperation({ summary: 'Tracker un terme de recherche' })
+  async trackSearchTerm(@Body() body: { term: string }) {
+    const term = (body?.term || '').trim().toLowerCase();
+    if (!term || term.length < 2) return { success: false };
+
+    await this.prisma.searchTerm.upsert({
+      where: { term },
+      update: { clickCount: { increment: 1 } },
+      create: { term, clickCount: 1 },
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * GET /public/search/popular — Retourne les termes les plus cliqués
+   */
+  @Get('search/popular')
+  @ApiOperation({ summary: 'Termes de recherche populaires' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getPopularSearchTerms(@Query('limit') limit?: number) {
+    const take = Math.min(Number(limit) || 12, 50);
+
+    const terms = await this.prisma.searchTerm.findMany({
+      orderBy: { clickCount: 'desc' },
+      take,
+      select: { term: true, clickCount: true },
+    });
+
+    return { data: terms.map(t => t.term) };
+  }
+}

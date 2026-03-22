@@ -307,17 +307,7 @@ export class UpdateVendorProfileDto {
   @IsEmail({}, { message: 'Format d\'email invalide' })
   email?: string;
 
-  @ApiProperty({ 
-    example: '+33 6 12 34 56 78',
-    description: 'Numéro de téléphone',
-    required: false
-  })
-  @IsOptional()
-  @IsString()
-  @Matches(/^[\+]?[0-9\s\-\(\)]{8,}$/, { message: 'Format de téléphone invalide' })
-  phone?: string;
-
-  @ApiProperty({ 
+  @ApiProperty({
     example: 'France',
     description: 'Pays de résidence',
     required: false

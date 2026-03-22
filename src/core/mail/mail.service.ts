@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Resend } from 'resend';
 import * as crypto from 'crypto';
+import * as nodemailer from 'nodemailer';
 
 // Définition temporaire jusqu'à ce que Prisma génère l'enum
 export enum VendeurType {
@@ -25,13 +26,52 @@ export class MailService {
     return this.resendClient;
   }
 
-  private async _send(to: string, subject: string, html: string): Promise<void> {
-    await this.getResend().emails.send({
-      from: this.fromEmail,
+  /**
+   * Envoie via SMTP (Gmail) — fallback fiable si Resend échoue
+   */
+  private async _sendViaSMTP(to: string, subject: string, html: string): Promise<void> {
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: false,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `PrintAlma <${process.env.SMTP_USER}>`,
       to,
       subject,
       html,
     });
+    console.log(`✅ Email envoyé via SMTP à ${to}`);
+  }
+
+  private async _send(to: string, subject: string, html: string): Promise<void> {
+    // Essayer Resend en premier
+    if (process.env.RESEND_API_KEY) {
+      try {
+        const { data, error } = await this.getResend().emails.send({
+          from: this.fromEmail,
+          to,
+          subject,
+          html,
+        });
+        if (error) {
+          console.warn(`⚠️ Resend a échoué (${error.message}), fallback SMTP...`);
+          await this._sendViaSMTP(to, subject, html);
+          return;
+        }
+        console.log(`✅ Email envoyé via Resend à ${to} (id: ${data?.id})`);
+        return;
+      } catch (e) {
+        console.warn(`⚠️ Resend exception (${e.message}), fallback SMTP...`);
+      }
+    }
+    // Fallback SMTP
+    await this._sendViaSMTP(to, subject, html);
   }
 
   /**
@@ -148,6 +188,71 @@ export class MailService {
     await this._send(to, subject, html);
 
     console.log(`✅ Email OTP envoyé à ${to}`);
+  }
+
+  /**
+   * Envoie un code OTP de vérification d'email lors de l'inscription vendeur
+   */
+  async sendEmailVerificationOTP(to: string, firstName: string, code: string): Promise<void> {
+    const subject = 'Vérification de votre email PrintAlma';
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Vérification email PrintAlma</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; background: #f4f4f4; }
+          .container { max-width: 600px; margin: 20px auto; padding: 0; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          .header { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 30px 20px; text-align: center; }
+          .header h1 { margin: 0; font-size: 24px; }
+          .content { padding: 30px 20px; }
+          .otp-box { background: #fffbeb; border: 3px solid #f59e0b; border-radius: 8px; padding: 25px; margin: 25px 0; text-align: center; }
+          .otp-code { font-family: 'Courier New', monospace; font-size: 40px; font-weight: bold; color: #d97706; letter-spacing: 10px; margin: 10px 0; }
+          .info-box { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px; }
+          .steps { background: #f8fafc; border-radius: 8px; padding: 20px; margin: 20px 0; }
+          .step { display: flex; align-items: flex-start; margin-bottom: 12px; }
+          .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 13px; color: #666; border-top: 1px solid #ddd; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>✉️ Vérification de votre email</h1>
+          </div>
+          <div class="content">
+            <h2>Bonjour ${firstName},</h2>
+            <p>Merci de vous être inscrit sur <strong>PrintAlma</strong> ! Pour finaliser votre inscription, veuillez vérifier votre adresse email en saisissant le code ci-dessous :</p>
+
+            <div class="otp-box">
+              <p style="margin: 0 0 10px 0; color: #92400e; font-size: 14px; font-weight: bold;">Votre code de vérification :</p>
+              <div class="otp-code">${code}</div>
+              <p style="margin: 10px 0 0 0; color: #92400e; font-size: 13px;">⏱️ Ce code expire dans <strong>10 minutes</strong></p>
+            </div>
+
+            <div class="info-box">
+              <strong>📋 Prochaines étapes :</strong><br>
+              1. Saisissez ce code pour vérifier votre email.<br>
+              2. Votre compte sera ensuite examiné par notre équipe.<br>
+              3. Vous recevrez un email de confirmation une fois votre compte activé.
+            </div>
+
+            <p style="font-size: 14px; color: #666;">
+              Si vous n'avez pas créé de compte PrintAlma, ignorez simplement cet email.
+            </p>
+          </div>
+          <div class="footer">
+            <p>© ${new Date().getFullYear()} PrintAlma - Plateforme de vente en ligne</p>
+            <p>Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    await this._send(to, subject, html);
+    console.log(`✅ Email vérification inscription envoyé à ${to}`);
   }
 
   /**
@@ -1701,51 +1806,102 @@ export class MailService {
     // Générer le HTML des items de commande
     const itemsHtml = order.orderItems?.map((item: any) => {
       const productName = item.productName || item.product?.name || item.vendorProduct?.name || 'Produit';
-
-      // 🔧 FIX: Différencier les produits vendeurs des produits normaux
-      // Pour les PRODUITS VENDEURS : utiliser finalImageUrl du vendorProduct
-      // Pour les PRODUITS NORMAUX : utiliser mockupUrl de l'orderItem
-      let rawImage: string | null = null;
-
-      if (item.vendorProductId && item.vendorProduct?.finalImageUrl) {
-        // Cas 1: Produit vendeur - utiliser finalImageUrl
-        rawImage = item.vendorProduct.finalImageUrl;
-        console.log(`📸 [MailService] Produit vendeur "${productName}" - Image: ${rawImage}`);
-      } else if (item.mockupUrl) {
-        // Cas 2: Produit normal avec mockup personnalisé (image déjà générée lors de la commande)
-        rawImage = item.mockupUrl;
-        console.log(`📸 [MailService] Produit normal "${productName}" - Image: ${rawImage}`);
-      } else {
-        console.warn(`⚠️  [MailService] Aucune image pour "${productName}" (vendorProductId: ${item.vendorProductId}, mockupUrl: ${item.mockupUrl})`);
-      }
-
-      // Convertir les URLs relatives en URLs absolues pour l'affichage dans l'email
-      const productImage = this.toAbsoluteUrl(rawImage) || 'https://via.placeholder.com/80?text=Image';
-      console.log(`🔗 [MailService] Image finale pour "${productName}": ${productImage}`);
-
       const quantity = item.quantity || 1;
       const unitPrice = item.unitPrice || item.price || 0;
       const itemTotal = unitPrice * quantity;
       const size = item.size || 'Standard';
       const color = item.color || item.colorVariation?.name || '-';
 
+      // ── Collecter les URLs de vues depuis mockupUrlsByView ──────────────────
+      let viewUrls: string[] = [];
+      let viewCount = 0;
+      try {
+        const rawMockupsByView = item.customization?.mockupUrlsByView;
+        if (rawMockupsByView && typeof rawMockupsByView === 'object' && !Array.isArray(rawMockupsByView)) {
+          viewUrls = Object.values(rawMockupsByView as Record<string, string>)
+            .filter((u): u is string => typeof u === 'string' && u.length > 0);
+          viewCount = viewUrls.length;
+        }
+      } catch (e) {
+        console.warn(`⚠️  [MailService] Erreur lecture mockupUrlsByView pour "${productName}":`, e);
+      }
+
+      console.log(`📸 [MailService] "${productName}" - ${viewCount} vue(s) dans mockupUrlsByView`);
+
+      // ── Fallback si aucune vue ──────────────────────────────────────────────
+      if (viewCount === 0) {
+        let rawFallback: string | null = null;
+        if (item.vendorProductId && item.vendorProduct?.finalImageUrl) {
+          rawFallback = item.vendorProduct.finalImageUrl;
+        } else if (item.mockupUrl) {
+          rawFallback = item.mockupUrl;
+        } else if (item.customization?.finalImageUrlCustom) {
+          rawFallback = item.customization.finalImageUrlCustom;
+        }
+        const fallbackSrc = this.toAbsoluteUrl(rawFallback) || 'https://via.placeholder.com/80?text=Image';
+        viewUrls = [fallbackSrc];
+        viewCount = 1;
+      } else {
+        viewUrls = viewUrls.map(u => this.toAbsoluteUrl(u) || u);
+      }
+
+      // ── Labels de vue ───────────────────────────────────────────────────────
+      const viewLabels = ['Face avant', 'Face arriere', 'Vue 3', 'Vue 4', 'Vue 5'];
+
+      // ── Construire le HTML des images selon le nombre de vues ───────────────
+      let imagesHtml = '';
+      if (viewCount === 1) {
+        imagesHtml = `<img src="${viewUrls[0]}" alt="${productName}" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;" />`;
+
+      } else if (viewCount === 2) {
+        const cells = viewUrls.map((url, i) => {
+          const label = viewLabels[i] || ('Vue ' + (i + 1));
+          return '<td style="padding:0 4px 0 0;vertical-align:top;text-align:center;">'
+            + '<img src="' + url + '" alt="' + label + '" style="width:62px;height:62px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;display:block;" />'
+            + '<div style="font-size:10px;color:#9ca3af;margin-top:3px;">' + label + '</div>'
+            + '</td>';
+        }).join('');
+        imagesHtml = '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>' + cells + '</tr></table>';
+
+      } else {
+        const maxShow = 4;
+        const displayed = viewUrls.slice(0, maxShow);
+        const remaining = viewUrls.length - maxShow;
+        const imgSize = viewCount === 3 ? 52 : 48;
+        const cells = displayed.map((url, i) => {
+          const label = viewLabels[i] || ('Vue ' + (i + 1));
+          return '<td style="padding:0 3px 0 0;vertical-align:top;text-align:center;">'
+            + '<img src="' + url + '" alt="' + label + '" style="width:' + imgSize + 'px;height:' + imgSize + 'px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;display:block;" />'
+            + '<div style="font-size:9px;color:#9ca3af;margin-top:2px;">' + label + '</div>'
+            + '</td>';
+        }).join('');
+        const extraCell = remaining > 0
+          ? '<td style="padding:0;vertical-align:middle;text-align:center;">'
+            + '<div style="width:' + imgSize + 'px;height:' + imgSize + 'px;background:#f3f4f6;border-radius:5px;border:1px solid #e5e7eb;display:table-cell;vertical-align:middle;text-align:center;font-size:12px;font-weight:700;color:#6b7280;">+' + remaining + '</div>'
+            + '</td>'
+          : '';
+        imagesHtml = '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>' + cells + extraCell + '</tr></table>';
+      }
+
+      const viewBadge = viewCount > 1
+        ? '<div style="font-size:11px;color:#14689a;margin-top:4px;">&#10003; ' + viewCount + ' vues personnalisees</div>'
+        : '';
+
       return `
         <tr style="border-bottom: 1px solid #e5e7eb;">
           <td style="padding: 15px 10px;">
-            <div style="display: flex; align-items: center; gap: 15px;">
-              <img
-                src="${productImage}"
-                alt="${productName}"
-                style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid #e5e7eb;"
-                onerror="this.src='https://via.placeholder.com/80?text=Image'"
-              />
-              <div>
-                <div style="font-weight: 600; color: #111827; margin-bottom: 4px;">${productName}</div>
-                <div style="font-size: 13px; color: #6b7280;">
-                  Taille: ${size} • Couleur: ${color}
-                </div>
-              </div>
-            </div>
+            <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;">
+              <tr>
+                <td style="vertical-align:top; padding-right:14px; width:1%;">
+                  ${imagesHtml}
+                </td>
+                <td style="vertical-align:middle;">
+                  <div style="font-weight: 600; color: #111827; margin-bottom: 4px;">${productName}</div>
+                  <div style="font-size: 13px; color: #6b7280;">Taille: ${size} &bull; Couleur: ${color}</div>
+                  ${viewBadge}
+                </td>
+              </tr>
+            </table>
           </td>
           <td style="padding: 15px 10px; text-align: center; color: #6b7280;">${quantity}</td>
           <td style="padding: 15px 10px; text-align: right; color: #6b7280;">${unitPrice.toFixed(0)} FCFA</td>

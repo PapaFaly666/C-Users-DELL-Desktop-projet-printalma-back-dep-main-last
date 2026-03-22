@@ -135,6 +135,7 @@ export class VendorOnboardingService {
         where: { id: vendorId },
         data: {
           profile_completed: true,
+          first_login_completed: true,
           onboarding_completed_at: new Date(),
           profile_photo_url: profileImageUrl,
           ...socialMediaData,
@@ -194,19 +195,45 @@ export class VendorOnboardingService {
       throw new NotFoundException('Vendeur non trouvé');
     }
 
-    // Le profil est considéré complété si le flag profile_completed est true
-    // (même si les champs sont vides, car l'onboarding est optionnel)
-    const isComplete = vendor.profile_completed;
+    const hasProfileImage = !!vendor.profile_photo_url;
+    const hasPhone = vendor.vendorPhones.length > 0;
+    const hasSocialMedia = !!(
+      vendor.facebook_url ||
+      vendor.instagram_url ||
+      vendor.twitter_url ||
+      vendor.tiktok_url ||
+      vendor.youtube_url ||
+      vendor.linkedin_url
+    );
+
+    // Calcul du pourcentage de complétion (photo, téléphone, réseaux sociaux)
+    const completedFields = [hasProfileImage, hasPhone, hasSocialMedia].filter(Boolean).length;
+    const completionPercentage = Math.round((completedFields / 3) * 100);
 
     return {
       success: true,
-      profileCompleted: isComplete,
+      profileCompleted: vendor.profile_completed,
+      firstLoginCompleted: vendor.first_login_completed,
+      completionPercentage,
       details: {
-        hasProfileImage: !!vendor.profile_photo_url,
+        hasProfileImage,
         phoneCount: vendor.vendorPhones.length,
+        hasSocialMedia,
         completedAt: vendor.onboarding_completed_at,
       },
     };
+  }
+
+  /**
+   * Marquer l'onboarding comme vu (pour ne plus le montrer)
+   */
+  async markOnboardingSeen(vendorId: number) {
+    await this.prisma.user.update({
+      where: { id: vendorId },
+      data: { first_login_completed: true },
+    });
+
+    return { success: true };
   }
 
   /**

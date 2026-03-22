@@ -101,4 +101,15 @@ export class VendorOnboardingController {
   async updatePhones(@Request() req, @Body() dto: UpdatePhonesDto) {
     return this.onboardingService.updatePhones(req.user.id, dto);
   }
+
+  /**
+   * POST /api/vendor/mark-onboarding-seen
+   * Marquer l'onboarding comme vu (ne plus rediriger)
+   */
+  @Post('mark-onboarding-seen')
+  @Roles('VENDEUR')
+  @HttpCode(HttpStatus.OK)
+  async markOnboardingSeen(@Request() req) {
+    return this.onboardingService.markOnboardingSeen(req.user.id);
+  }
 }

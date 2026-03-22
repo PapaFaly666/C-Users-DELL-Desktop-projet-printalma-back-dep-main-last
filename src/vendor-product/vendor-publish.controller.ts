@@ -882,6 +882,84 @@ export class VendorPublishController {
   }
 
   /**
+   * ✏️ MODIFIER UN PRODUIT VENDEUR
+   */
+  @Put('products/:id')
+  @UseGuards(JwtAuthGuard, VendorGuard)
+  @ApiOperation({ summary: 'Modifier les infos d\'un produit vendeur (nom, description, prix, stock, prix par taille)' })
+  async updateVendorProduct(
+    @Request() req,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: {
+      vendorName?: string;
+      vendorDescription?: string;
+      vendorPrice?: number;
+      vendorStock?: number;
+      sizePricing?: Array<{ size: string; salePrice: number }>;
+    },
+  ) {
+    const vendorId = req.user.sub || req.user.id;
+    const prisma = this.vendorPublishService['prisma'];
+
+    const product = await prisma.vendorProduct.findFirst({
+      where: { id, vendorId, isDelete: false },
+    });
+
+    if (!product) {
+      throw new BadRequestException('Produit introuvable ou accès refusé');
+    }
+
+    const updateData: any = {};
+    if (body.vendorName !== undefined) {
+      updateData.vendorName = body.vendorName;
+      updateData.name = body.vendorName; // sync main name field for public API
+    }
+    if (body.vendorDescription !== undefined) {
+      updateData.vendorDescription = body.vendorDescription;
+      updateData.description = body.vendorDescription; // sync main description field for public API
+    }
+    if (body.vendorPrice !== undefined) updateData.price = body.vendorPrice;
+    if (body.vendorStock !== undefined) updateData.vendorStock = body.vendorStock;
+
+    const updated = await prisma.vendorProduct.update({
+      where: { id },
+      data: updateData,
+      include: { sizePrices: true },
+    });
+
+    // Update salePrice per size if provided
+    if (body.sizePricing && body.sizePricing.length > 0) {
+      // Validate: salePrice >= costPrice * 1.1 for each size
+      const existingSizePrices = await prisma.vendorProductSizePrice.findMany({
+        where: { vendorProductId: id },
+      });
+
+      for (const { size, salePrice } of body.sizePricing) {
+        const existing = existingSizePrices.find(sp => sp.size === size);
+        if (existing) {
+          const minPrice = Math.round(existing.costPrice * 1.1);
+          if (salePrice < minPrice) {
+            throw new BadRequestException(
+              `Prix invalide pour la taille ${size}: ${salePrice} FCFA < minimum recommandé ${minPrice} FCFA (coût + 10%)`
+            );
+          }
+        }
+      }
+
+      await Promise.all(
+        body.sizePricing.map(({ size, salePrice }) =>
+          prisma.vendorProductSizePrice.updateMany({
+            where: { vendorProductId: id, size },
+            data: { salePrice },
+          })
+        )
+      );
+    }
+
+    return { success: true, message: 'Produit mis à jour', data: updated };
+  }
+
+  /**
    * 🚀 PUBLIER UN PRODUIT VENDEUR - Endpoint manquant
    */
   @Patch('products/:id/publish')

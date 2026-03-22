@@ -852,15 +852,21 @@ export class OrderService {
         include: {
           orderItems: {
             include: {
-              product: true, // 🔧 Produit de base (l'image est déjà dans mockupUrl de l'orderItem)
+              product: true,
               vendorProduct: {
                 select: {
                   id: true,
                   name: true,
-                  finalImageUrl: true, // 🔧 Image finale du produit vendeur
+                  finalImageUrl: true,
                 }
               },
               colorVariation: true,
+              customization: {
+                select: {
+                  mockupUrlsByView: true,
+                  finalImageUrlCustom: true,
+                }
+              },
             }
           },
           user: true
@@ -2678,10 +2684,9 @@ export class OrderService {
         }
       });
 
-      // Si pas de stock trouvé, on récupère le nom du produit pour le message d'erreur
-      if (!productStock) {
-        this.logger.warn(`📦 Pas de stock configuré pour: productId=${requirement.productId}, colorId=${requirement.colorId}, taille=${requirement.sizeName}`);
-        // On peut choisir de continuer ou de bloquer - ici on continue car le stock n'est peut-être pas géré
+      // Si pas de stock trouvé ou stock = 0 → non configuré, on laisse passer
+      if (!productStock || productStock.stock === 0) {
+        this.logger.warn(`📦 Stock non configuré (0 ou absent) pour: productId=${requirement.productId}, colorId=${requirement.colorId}, taille=${requirement.sizeName} → commande autorisée`);
         continue;
       }
 

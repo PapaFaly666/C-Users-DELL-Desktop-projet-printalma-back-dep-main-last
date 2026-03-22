@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { VendorProductStatus } from '@prisma/client';
 import { CloudinaryService } from '../core/cloudinary/cloudinary.service';
 import { VendorPublishDto, VendorPublishResponseDto } from './dto/vendor-publish.dto';
 import { VendorProductsListResponseDto, VendorStatsResponseDto, VendorProductDetailResponseDto } from './dto/vendor-product-response.dto';
@@ -1927,7 +1928,7 @@ export class VendorPublishService {
           name: designData.name,
           description: designData.description || '',
           price: designData.price !== undefined ? designData.price : 0,
-          categoryId: this.getCategoryId(designData.category),
+          categoryId: (designData as any).categoryId ?? this.getCategoryId(designData.category),
           imageUrl: uploadResult.secure_url,
           thumbnailUrl: uploadResult.secure_url,
           cloudinaryPublicId: uploadResult.public_id,
@@ -2475,12 +2476,13 @@ export class VendorPublishService {
     try {
       const whereClause: any = {
         isDelete: false,
-        vendor: { status: true } // Masquer les produits des vendeurs désactivés côté client
+        vendor: { status: true }, // Masquer les produits des vendeurs désactivés
+        status: { notIn: ['DRAFT', 'REJECTED', 'ERROR'] }, // Seulement les produits visibles publiquement
       };
 
       // Filtres
       if (options.vendorId) whereClause.vendorId = options.vendorId;
-      if (options.status) whereClause.status = options.status;
+      if (options.status) whereClause.status = options.status; // Override si status explicitement demandé
       if (options.isBestSeller === true) {
         whereClause.isBestSeller = true;
         this.logger.log(`🏆 Filtre isBestSeller activé`);
@@ -2601,9 +2603,19 @@ export class VendorPublishService {
           }
         });
 
-        this.logger.log(`📊 Catégories trouvées - Design: ${designCategory?.id || 'NULL'}, Base: ${baseCategory?.id || 'NULL'}`);
+        // 3. Chercher dans les SubCategory (sous-catégories)
+        const subCategory = await this.prisma.subCategory.findFirst({
+          where: {
+            name: {
+              equals: options.category,
+              mode: 'insensitive'
+            }
+          }
+        });
 
-        // 3. Construire le filtre OR pour les deux types de catégories
+        this.logger.log(`📊 Catégories trouvées - Design: ${designCategory?.id || 'NULL'}, Base: ${baseCategory?.id || 'NULL'}, Sub: ${subCategory?.id || 'NULL'}`);
+
+        // 4. Construire le filtre OR pour les trois types de catégories
         const categoryFilters: any[] = [];
 
         // Ajouter filtre pour DesignCategory si trouvée
@@ -2630,7 +2642,17 @@ export class VendorPublishService {
           this.logger.log(`✅ Ajout filtre Category ID: ${baseCategory.id}`);
         }
 
-        // 4. Combiner tous les filtres (adminProduct + category)
+        // Ajouter filtre pour SubCategory si trouvée
+        if (subCategory) {
+          categoryFilters.push({
+            baseProduct: {
+              subCategoryId: subCategory.id
+            }
+          });
+          this.logger.log(`✅ Ajout filtre SubCategory ID: ${subCategory.id}`);
+        }
+
+        // 5. Combiner tous les filtres (adminProduct + category)
         const allFilters = [...adminProductFilters, ...categoryFilters];
 
         if (allFilters.length > 0) {
@@ -2645,9 +2667,7 @@ export class VendorPublishService {
         } else {
           // Si aucun filtre trouvé mais category demandé, retourner des résultats vides
           if (options.category) {
-            whereClause.design = {
-              categoryId: -1
-            };
+            whereClause.id = -1;
             this.logger.log(`❌ Aucune catégorie trouvée pour "${options.category}" - retour vide`);
           }
         }
@@ -2670,7 +2690,12 @@ export class VendorPublishService {
           { description: { contains: options.search, mode: 'insensitive' } },
           { vendor: { firstName: { contains: options.search, mode: 'insensitive' } } },
           { vendor: { lastName: { contains: options.search, mode: 'insensitive' } } },
-          { vendor: { shop_name: { contains: options.search, mode: 'insensitive' } } }
+          { vendor: { shop_name: { contains: options.search, mode: 'insensitive' } } },
+          { design: { category: { name: { contains: options.search, mode: 'insensitive' } } } },
+          { design: { name: { contains: options.search, mode: 'insensitive' } } },
+          { baseProduct: { name: { contains: options.search, mode: 'insensitive' } } },
+          { baseProduct: { subCategory: { name: { contains: options.search, mode: 'insensitive' } } } },
+          { baseProduct: { category: { name: { contains: options.search, mode: 'insensitive' } } } },
         ];
 
         if (whereClause.OR && whereClause.OR.length > 0) {
@@ -2719,7 +2744,9 @@ export class VendorPublishService {
               sizePrices: true
             }
           },
-          design: true,
+          design: {
+            include: { category: true },
+          },
           // ✅ AJOUT: Récupérer les images finales avec finalImageUrl pour chaque couleur
           images: {
             select: {
@@ -2935,8 +2962,13 @@ export class VendorPublishService {
 
       this.logger.log(`🎨 Design trouvé: ${originalProduct.design.name} (id: ${originalProduct.designId})`);
 
-      // 2. Récupérer tous les autres produits avec le même design (PUBLISHED uniquement)
+      // 2. Récupérer tous les autres produits avec le même design
       const { limit = 20 } = options;
+
+      // Filtre statut: tout sauf DRAFT, REJECTED, ERROR
+      const statusFilter = {
+        notIn: [VendorProductStatus.DRAFT, VendorProductStatus.REJECTED, VendorProductStatus.ERROR]
+      };
 
       const [products, totalCount] = await Promise.all([
         this.prisma.vendorProduct.findMany({
@@ -2944,8 +2976,7 @@ export class VendorPublishService {
             designId: originalProduct.designId,
             id: { not: productId }, // Exclure le produit original
             isDelete: false,
-            status: 'PUBLISHED',
-            vendor: { status: true } // Seulement vendeurs actifs
+            status: statusFilter,
           },
           include: {
             vendor: {
@@ -2997,30 +3028,33 @@ export class VendorPublishService {
             designId: originalProduct.designId,
             id: { not: productId },
             isDelete: false,
-            status: 'PUBLISHED',
-            vendor: { status: true }
+            status: statusFilter,
           }
         })
       ]);
 
       // 3. Formater les produits avec finalUrlImage pour chaque couleur
       const formattedProducts = await Promise.all(
-        products.map(async (product) => {
+        products.map(async (product: any) => {
           const enriched = await this.enrichVendorProductWithCompleteStructure(product);
 
           // Ajouter finalUrlImage à chaque colorVariation
           const colorVariationsWithFinal = enriched.adminProduct.colorVariations.map((cv: any) => {
-            const finalImage = product.images.find((img: any) => img.colorId === cv.id);
+            const finalImage = (product.images || []).find((img: any) => img.colorId === cv.id);
             return {
               ...cv,
               finalUrlImage: finalImage?.finalImageUrl || null
             };
           });
 
+          const genre = product.baseProduct?.genre || null;
+
           return {
             ...enriched,
+            genre, // ← top-level pour faciliter le filtrage frontend
             adminProduct: {
               ...enriched.adminProduct,
+              genre,
               colorVariations: colorVariationsWithFinal
             }
           };
@@ -3158,6 +3192,18 @@ export class VendorPublishService {
               }
             }
           },
+          // ✅ IMAGES FINALES avec design appliqué (finalImageUrl par couleur)
+          images: {
+            where: { imageType: 'final' },
+            select: {
+              id: true,
+              colorId: true,
+              colorName: true,
+              colorCode: true,
+              finalImageUrl: true,
+              cloudinaryUrl: true
+            }
+          },
           design: {
             include: {
               category: true
@@ -3181,6 +3227,16 @@ export class VendorPublishService {
       const enrichedProducts = await Promise.all(
         products.map(async (product) => {
           const enrichedProduct = await this.enrichVendorProductWithCompleteStructure(product);
+          // ✅ Ajouter finalImages directement depuis les images chargées (imageType=final)
+          enrichedProduct.finalImages = (product.images || [])
+            .filter((img: any) => img.finalImageUrl)
+            .map((img: any) => ({
+              colorId: img.colorId,
+              colorName: img.colorName || '',
+              colorCode: img.colorCode || '#ccc',
+              finalImageUrl: img.finalImageUrl,
+            }));
+          enrichedProduct.defaultColorId = product.defaultColorId ?? null;
           return enrichedProduct;
         })
       );
@@ -3313,6 +3369,7 @@ export class VendorPublishService {
       return {
         id: product.id,
         vendorName: product.name,
+        description: product.description || product.vendorDescription || null,
         price: product.price,
         status: product.status,
 

@@ -123,150 +123,117 @@ export class BestSellersService {
       vendorsCount: number;
     };
   }> {
-    const { limit = 20, offset = 0, category, vendorId, minSales = 1 } = options;
+    const { limit = 20, offset = 0, category, vendorId, minSales = 0 } = options;
 
-    console.log('🔍 [BEST-SELLERS] Récupération des produits les plus vendus (basé sur salesCount):', options);
-
-    // ✅ MODIFIÉ: Ne plus filtrer par isBestSeller, mais par salesCount pour avoir les vraies meilleures ventes
-    const where: any = {
-      isValidated: true,
-      status: 'PUBLISHED',
-      isDelete: false,
-      salesCount: {
-        gte: minSales
-      }
-    };
-
-    console.log('🔍 [BEST-SELLERS] Conditions where:', JSON.stringify(where, null, 2));
-
-    // Filtre par vendeur
-    if (vendorId) {
-      where.vendorId = vendorId;
-    }
-
-    // Filtre par catégorie (via le produit de base)
-    if (category) {
-      where.baseProduct = {
-        CategoryToProduct: {
-          some: {
-            categories: {
-              name: category
-            }
-          }
-        }
-      };
-    }
-
-    console.log('🔍 [BEST-SELLERS] Conditions finales:', JSON.stringify(where, null, 2));
+    console.log('🔍 [BEST-SELLERS] Classement par commandes payées (paymentStatus=PAID):', options);
 
     try {
-      // Récupérer les produits avec toutes les informations + positions de design
-      let [products, total] = await Promise.all([
-        this.prisma.vendorProduct.findMany({
-          where,
+      // ─── Étape 1 : compter les commandes payées par produit vendeur ──────────
+      // On groupe OrderItem par vendorProductId, filtré sur Order.paymentStatus=PAID
+      const vendorProductFilter: any = {
+        status: 'PUBLISHED',
+        isDelete: false,
+      };
+      if (vendorId) vendorProductFilter.vendorId = vendorId;
+      if (category) {
+        vendorProductFilter.baseProduct = {
+          CategoryToProduct: { some: { categories: { name: category } } }
+        };
+      }
+
+      const paidOrderCounts = await this.prisma.orderItem.groupBy({
+        by: ['vendorProductId'],
+        where: {
+          vendorProductId: { not: null },
+          order: { paymentStatus: 'PAID' },
+          vendorProduct: vendorProductFilter,
+        },
+        _count: { vendorProductId: true },
+        orderBy: { _count: { vendorProductId: 'desc' } },
+      });
+
+      // IDs triés par nombre de commandes payées décroissant
+      const rankedIds = paidOrderCounts
+        .filter(r => r.vendorProductId !== null)
+        .map(r => r.vendorProductId as number);
+
+      const total = rankedIds.length;
+
+      // Appliquer la pagination sur les IDs classés
+      const pageIds = rankedIds.slice(offset, offset + limit);
+
+      // ─── Étape 2 : récupérer les détails complets dans l'ordre du rang ───────
+      const include = {
+        baseProduct: {
           include: {
-            baseProduct: {
-              include: {
-                CategoryToProduct: { include: { categories: true } },
-                colorVariations: {
-                  include: {
-                    images: {
-                      include: {
-                        delimitations: true
-                      }
-                    }
-                  }
-                },
-                sizes: true // 🆕 Inclure les tailles du produit de base
-              }
+            CategoryToProduct: { include: { categories: true } },
+            colorVariations: {
+              include: { images: { include: { delimitations: true } } }
             },
-            vendor: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-                profile_photo_url: true,
-                shop_name: true
-              }
-            },
-            // ✅ INCLURE LES POSITIONS DE DESIGN STOCKÉES
-            designPositions: {
-              include: {
-                design: true
-              }
-            },
-            // 🖼️ INCLURE LES IMAGES FINALES GÉNÉRÉES
-            images: {
-              where: { imageType: 'final' },
-              select: {
-                id: true,
-                colorId: true,
-                colorName: true,
-                colorCode: true,
-                finalImageUrl: true,
-                finalImagePublicId: true,
-                cloudinaryUrl: true
-              }
-            },
-            sizePrices: true // 🆕 Inclure les prix par taille du vendeur
-          },
-          orderBy: [
-            { salesCount: 'desc' },
-            { totalRevenue: 'desc' },
-            { createdAt: 'desc' }
-          ],
-          take: limit,
-          skip: offset
-        }),
-        this.prisma.vendorProduct.count({ where })
-      ]);
+            sizes: true
+          }
+        },
+        vendor: {
+          select: {
+            id: true, firstName: true, lastName: true,
+            email: true, profile_photo_url: true, shop_name: true
+          }
+        },
+        designPositions: { include: { design: true } },
+        images: {
+          where: { imageType: 'final' },
+          select: {
+            id: true, colorId: true, colorName: true, colorCode: true,
+            finalImageUrl: true, finalImagePublicId: true, cloudinaryUrl: true
+          }
+        },
+        sizePrices: true
+      };
 
-      console.log('🔍 [BEST-SELLERS] Produits trouvés:', products.length);
-      console.log('🔍 [BEST-SELLERS] Total count:', total);
+      // Récupérer les produits (sans ordre garanti par findMany)
+      const productMap = new Map(
+        (await this.prisma.vendorProduct.findMany({
+          where: { id: { in: pageIds } },
+          include,
+        })).map(p => [p.id, p])
+      );
 
-      // ❌ Pas de fallback: si aucun best-seller réel, on retourne une liste vide
-      if (products.length === 0) {
-        console.log('⚠️ [BEST-SELLERS] Aucun produit best-seller réel trouvé. Aucun fallback appliqué.');
-      }
+      // Réordonner selon le rang des commandes payées
+      const products = pageIds
+        .map(id => productMap.get(id))
+        .filter(Boolean) as any[];
 
-      if (products.length > 0) {
-        console.log('🔍 [BEST-SELLERS] Premier produit:', {
-          id: products[0].id,
-          name: products[0].name,
-          isBestSeller: products[0].isBestSeller,
-          isValidated: products[0].isValidated,
-          status: products[0].status,
-          isDelete: products[0].isDelete,
-          salesCount: products[0].salesCount,
-          vendor: products[0].vendor,
-          designPositions: products[0].designPositions?.length || 0
-        });
-      }
+      console.log(`🔍 [BEST-SELLERS] ${products.length} produits classés par commandes payées. Total: ${total}`);
 
       // Statistiques
       const stats = await this.getBestSellersStats();
+
+      // Construire un index rapide du nombre de commandes payées par produit
+      const paidCountIndex = new Map(
+        paidOrderCounts.map(r => [r.vendorProductId as number, r._count.vendorProductId])
+      );
 
       // Formatter les résultats avec les utilitaires unifiés
       const formattedProducts: BestSellerProduct[] = products.map((product, index) => {
         // ✅ UTILISER LES UTILITAIRES UNIFIÉS pour les positions de design
         const standardizedDesignPositions = formatDesignPositions(product.designPositions || []);
 
-        // 🏆 CALCULER LE RANG BASÉ SUR LA POSITION DANS LES RÉSULTATS
+        // 🏆 RANG = position dans le classement des commandes payées (1 = plus commandé)
         const rank = offset + index + 1;
+        const paidOrderCount = paidCountIndex.get(product.id) || 0;
+        console.log(`🏆 [RANK] Produit ${product.id} "${product.name}" - Rang: ${rank}, Commandes payées: ${paidOrderCount}`);
 
         console.log(`✅ [UNIFIED] Produit ${product.id}: Positions standardisées`, standardizedDesignPositions.length);
-        console.log(`🏆 [RANK] Produit ${product.id} - Rang: ${rank}, Sales: ${product.salesCount}`);
 
         return {
           id: product.id,
           name: product.name,
           description: product.description,
           price: product.price,
-          salesCount: product.salesCount,
+          salesCount: paidOrderCount, // 🏆 Nombre réel de commandes payées
           totalRevenue: product.totalRevenue,
-          rank: rank, // 🏆 Rang calculé selon le tri par salesCount
-          bestSellerRank: product.bestSellerRank || rank, // Fallback sur le rang calculé
+          rank: rank, // 🏆 Rang basé sur les commandes payées (1 = plus commandé)
+          bestSellerRank: rank,
           averageRating: product.averageRating,
           viewsCount: product.viewsCount,
           
@@ -400,8 +367,8 @@ export class BestSellersService {
   }> {
     const { limit = 20, offset = 0, category, vendorId } = options;
 
+    // ✅ MODIFIÉ: status PUBLISHED suffit, pas de validation admin requise
     const where: any = {
-      isValidated: true,
       status: 'PUBLISHED',
       isDelete: false
     };

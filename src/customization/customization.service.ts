@@ -812,107 +812,125 @@ export class CustomizationService {
    * @param clientEmail - Email du client (optionnel)
    */
   private async generateAndSendCustomizationEmail(customization: any, clientEmail?: string): Promise<void> {
-    // Si pas d'email fourni, ne rien faire
-    if (!clientEmail) {
-      this.logger.log(`⏭️  Pas d'email fourni - génération de mockup et envoi ignorés`);
-      return;
+    this.logger.log(`\n🎨 ===== GÉNÉRATION MOCKUP =====`);
+    if (clientEmail) {
+      this.logger.log(`📧 Email client: ${clientEmail}`);
     }
-
-    this.logger.log(`\n🎨📧 ===== GÉNÉRATION MOCKUP ET ENVOI EMAIL =====`);
-    this.logger.log(`📧 Email client: ${clientEmail}`);
     this.logger.log(`🆔 Customization ID: ${customization.id}`);
 
     try {
-      // 1. Vérifier qu'il y a des éléments de design
+      // 1. Récupérer TOUTES les vues de elementsByView (y compris celles sans éléments)
       const elementsByView = customization.elementsByView || {};
-      const viewKeys = Object.keys(elementsByView);
+      const allViewKeys = Object.keys(elementsByView);
 
-      if (viewKeys.length === 0) {
-        this.logger.warn(`⚠️  Aucune vue trouvée - pas de mockup à générer`);
+      if (allViewKeys.length === 0) {
+        this.logger.warn(`⚠️  Aucune vue dans elementsByView - pas de mockup à générer`);
         return;
       }
 
-      const firstViewKey = viewKeys[0];
-      const elements = elementsByView[firstViewKey];
+      this.logger.log(`🗂️ ${allViewKeys.length} vue(s) à traiter: ${allViewKeys.join(', ')}`);
 
-      if (!Array.isArray(elements) || elements.length === 0) {
-        this.logger.warn(`⚠️  Aucun élément de design - pas de mockup à générer`);
+      const delimitations: any[] = Array.isArray(customization.delimitations) ? customization.delimitations : [];
+      const mockupUrlsByView: Record<string, string> = {};
+
+      // 2. Traiter CHAQUE vue - avec ou sans éléments de design
+      for (const viewKey of allViewKeys) {
+        const elements = elementsByView[viewKey];
+        const hasElements = Array.isArray(elements) && elements.length > 0;
+
+        // Extraire colorVariationId et imageId depuis la clé "colorId-imageId"
+        const [colorVariationId, imageId] = viewKey.split('-').map(Number);
+
+        // Trouver l'image du produit pour cette vue
+        const colorVariation = customization.product?.colorVariations?.find(
+          (cv: any) => cv.id === colorVariationId
+        );
+        const productImage = colorVariation?.images?.find((img: any) => img.id === imageId)
+          ?? colorVariation?.images?.[0];
+
+        if (!productImage?.url) {
+          this.logger.warn(`⚠️  [Vue ${viewKey}] Image produit introuvable - vue ignorée`);
+          continue;
+        }
+
+        // Si pas d'éléments, utiliser directement l'URL de l'image produit
+        if (!hasElements) {
+          mockupUrlsByView[viewKey] = productImage.url;
+          this.logger.log(`📷 [Vue ${viewKey}] Pas d'éléments - image produit brute: ${productImage.url}`);
+          continue;
+        }
+
+        // Trouver la délimitation correspondant à cette vue (par viewId ou productImageId)
+        const delimitation = delimitations.find(
+          d => d.viewId === imageId || d.productImageId === imageId
+        ) ?? delimitations[0];
+
+        this.logger.log(`🎨 [Vue ${viewKey}] ${elements.length} élément(s) sur image: ${productImage.url}`);
+        if (delimitation) {
+          this.logger.log(`📐 [Vue ${viewKey}] Délimitation: ${delimitation.width}x${delimitation.height}px`);
+        }
+
+        try {
+          const url = await this.mockupGenerator.generateOrderMockup({
+            productImageUrl: productImage.url,
+            elements,
+            delimitation: delimitation ? {
+              x: delimitation.x,
+              y: delimitation.y,
+              width: delimitation.width,
+              height: delimitation.height
+            } : undefined
+          });
+
+          mockupUrlsByView[viewKey] = url;
+          this.logger.log(`✅ [Vue ${viewKey}] Mockup généré: ${url}`);
+        } catch (error) {
+          this.logger.error(`❌ [Vue ${viewKey}] Erreur génération mockup: ${error.message}`);
+          // En cas d'erreur, utiliser l'image produit brute comme fallback
+          mockupUrlsByView[viewKey] = productImage.url;
+        }
+      }
+
+      if (Object.keys(mockupUrlsByView).length === 0) {
+        this.logger.warn(`⚠️  Aucun mockup généré - rien à sauvegarder`);
         return;
       }
 
-      this.logger.log(`🎨 ${elements.length} élément(s) de design trouvé(s) dans la vue ${firstViewKey}`);
+      // 3. Sauvegarder : priorité aux vues avec éléments générés par Sharp pour finalImageUrlCustom
+      // On cherche d'abord une vue customisée (non image brute) comme URL principale
+      const customizedViewKeys = allViewKeys.filter(k => {
+        const els = elementsByView[k];
+        return Array.isArray(els) && els.length > 0;
+      });
+      const primaryKey = customizedViewKeys[0] ?? allViewKeys[0];
+      const primaryUrl = mockupUrlsByView[primaryKey] ?? Object.values(mockupUrlsByView)[0];
 
-      // 2. Récupérer l'image du produit (via colorVariation)
-      const colorVariation = customization.product?.colorVariations?.find(
-        (cv: any) => cv.id === customization.colorVariationId
-      );
-
-      if (!colorVariation || !colorVariation.images?.[0]?.url) {
-        this.logger.warn(`⚠️  Image du produit introuvable - pas de mockup à générer`);
-        return;
-      }
-
-      const productImageUrl = colorVariation.images[0].url;
-      this.logger.log(`📸 Image du produit: ${productImageUrl}`);
-
-      // 3. Récupérer la délimitation
-      const delimitation = customization.delimitations?.[0];
-
-      if (delimitation) {
-        this.logger.log(`📐 Délimitation: ${delimitation.width}x${delimitation.height}px`);
-      }
-
-      // 4. Générer le mockup avec le système robuste (Sharp)
-      this.logger.log(`🎨 Génération du mockup avec Sharp (système robuste)...`);
-      this.logger.log(`📐 Configuration:`);
-      this.logger.log(`   - Image produit: ${productImageUrl}`);
-      this.logger.log(`   - Nombre d'éléments: ${elements.length}`);
-      this.logger.log(`   - Délimitation: ${delimitation ? `${delimitation.width}x${delimitation.height}px` : 'Aucune'}`);
-
-      let mockupUrl: string;
-
-      try {
-        // Utiliser OrderMockupGeneratorService (support multi-éléments avec Sharp)
-        mockupUrl = await this.mockupGenerator.generateOrderMockup({
-          productImageUrl,
-          elements,
-          delimitation: delimitation ? {
-            x: delimitation.x,
-            y: delimitation.y,
-            width: delimitation.width,
-            height: delimitation.height
-          } : undefined
-        });
-
-        this.logger.log(`✅ Mockup généré avec succès: ${mockupUrl}`);
-      } catch (error) {
-        this.logger.error(`❌ Erreur lors de la génération du mockup:`, error.message);
-        throw new Error(`Échec de la génération du mockup: ${error.message}`);
-      }
-
-      // 5. Mettre à jour la personnalisation avec l'URL du mockup
       await this.prisma.productCustomization.update({
         where: { id: customization.id },
         data: {
-          previewImageUrl: mockupUrl,        // Compatibilité
-          finalImageUrlCustom: mockupUrl     // ✨ Nouvelle URL image finale Sharp
+          previewImageUrl: primaryUrl,
+          finalImageUrlCustom: primaryUrl,
+          mockupUrlsByView: mockupUrlsByView as any,
         }
       });
 
-      this.logger.log(`💾 Mockup sauvegardé dans previewImageUrl et finalImageUrlCustom`);
+      this.logger.log(`💾 Mockups sauvegardés: ${Object.keys(mockupUrlsByView).length} vue(s) dans mockupUrlsByView, finalImageUrlCustom = vue principale`);
 
-      // 6. Envoyer l'email au client
-      this.logger.log(`📧 Envoi de l'email à ${clientEmail}...`);
+      // 4. Envoyer l'email au client (seulement si email fourni)
+      if (clientEmail) {
+        this.logger.log(`📧 Envoi de l'email à ${clientEmail}...`);
 
-      await this.mailService.sendCustomizationEmail({
-        email: clientEmail,
-        productName: customization.product?.name || 'Produit personnalisé',
-        mockupUrl,
-        clientName: customization.clientName
-      });
+        await this.mailService.sendCustomizationEmail({
+          email: clientEmail,
+          productName: customization.product?.name || 'Produit personnalisé',
+          mockupUrl: primaryUrl,
+          clientName: customization.clientName
+        });
 
-      this.logger.log(`✅ Email envoyé avec succès à ${clientEmail}`);
-      this.logger.log(`===== FIN GÉNÉRATION ET ENVOI =====\n`);
+        this.logger.log(`✅ Email envoyé avec succès à ${clientEmail}`);
+      }
+
+      this.logger.log(`===== FIN GÉNÉRATION =====\n`);
 
     } catch (error) {
       this.logger.error(`❌ Erreur lors de la génération/envoi:`, error.message);
@@ -954,69 +972,97 @@ export class CustomizationService {
       this.logger.log(`✅ Personnalisation trouvée: ${customization.id}`);
 
       // 2. Vérifier qu'il y a des éléments de design
-      const elementsByView = customization.elementsByView || {};
-      const viewKeys = Object.keys(elementsByView);
+      const elementsByView = (customization.elementsByView as Record<string, any[]>) || {};
+      const allViewKeys = Object.keys(elementsByView);
 
-      if (viewKeys.length === 0) {
-        throw new BadRequestException('Aucune vue trouvée - impossible de générer le mockup');
+      if (allViewKeys.length === 0) {
+        throw new BadRequestException('Aucune vue dans elementsByView - impossible de générer le mockup');
       }
 
-      const firstViewKey = viewKeys[0];
-      const elements = elementsByView[firstViewKey];
+      this.logger.log(`🗂️ ${allViewKeys.length} vue(s) à régénérer: ${allViewKeys.join(', ')}`);
 
-      if (!Array.isArray(elements) || elements.length === 0) {
-        throw new BadRequestException('Aucun élément de design - impossible de générer le mockup');
+      const delimitations: any[] = Array.isArray(customization.delimitations) ? customization.delimitations as any[] : [];
+      const mockupUrlsByView: Record<string, string> = {};
+
+      // 3. Traiter CHAQUE vue - avec ou sans éléments
+      for (const viewKey of allViewKeys) {
+        const elements = elementsByView[viewKey];
+        const hasElements = Array.isArray(elements) && elements.length > 0;
+        const [colorVariationId, imageId] = viewKey.split('-').map(Number);
+
+        const colorVariation = customization.product?.colorVariations?.find(
+          (cv: any) => cv.id === colorVariationId
+        );
+        const productImage = colorVariation?.images?.find((img: any) => img.id === imageId)
+          ?? colorVariation?.images?.[0];
+
+        if (!productImage?.url) {
+          this.logger.warn(`⚠️  [Vue ${viewKey}] Image produit introuvable - vue ignorée`);
+          continue;
+        }
+
+        // Pas d'éléments → image produit brute directement
+        if (!hasElements) {
+          mockupUrlsByView[viewKey] = productImage.url;
+          this.logger.log(`📷 [Vue ${viewKey}] Pas d'éléments - image produit brute: ${productImage.url}`);
+          continue;
+        }
+
+        const delimitation = delimitations.find(
+          d => d.viewId === imageId || d.productImageId === imageId
+        ) ?? delimitations[0];
+
+        this.logger.log(`🎨 [Vue ${viewKey}] Génération sur image: ${productImage.url}`);
+
+        try {
+          const url = await this.mockupGenerator.generateOrderMockup({
+            productImageUrl: productImage.url,
+            elements,
+            delimitation: delimitation ? {
+              x: delimitation.x,
+              y: delimitation.y,
+              width: delimitation.width,
+              height: delimitation.height
+            } : undefined
+          });
+          mockupUrlsByView[viewKey] = url;
+          this.logger.log(`✅ [Vue ${viewKey}] Mockup généré: ${url}`);
+        } catch (error) {
+          this.logger.error(`❌ [Vue ${viewKey}] Erreur: ${error.message}`);
+          mockupUrlsByView[viewKey] = productImage.url;
+        }
       }
 
-      this.logger.log(`🎨 ${elements.length} élément(s) de design trouvé(s)`);
-
-      // 3. Récupérer l'image du produit (via colorVariation)
-      const colorVariation = customization.product?.colorVariations?.find(
-        (cv: any) => cv.id === customization.colorVariationId
-      );
-
-      if (!colorVariation || !colorVariation.images?.[0]?.url) {
-        throw new BadRequestException('Image du produit introuvable');
+      if (Object.keys(mockupUrlsByView).length === 0) {
+        throw new BadRequestException('Échec de génération pour toutes les vues');
       }
 
-      const productImageUrl = colorVariation.images[0].url;
-      this.logger.log(`📸 Image du produit: ${productImageUrl}`);
-
-      // 4. Récupérer la délimitation
-      const delimitation = customization.delimitations?.[0];
-
-      // 5. Générer le mockup avec Sharp
-      this.logger.log(`🎨 Génération du mockup avec Sharp...`);
-
-      const mockupUrl = await this.mockupGenerator.generateOrderMockup({
-        productImageUrl,
-        elements,
-        delimitation: delimitation ? {
-          x: delimitation.x,
-          y: delimitation.y,
-          width: delimitation.width,
-          height: delimitation.height
-        } : undefined
+      // Priorité aux vues customisées pour l'URL principale
+      const customizedKeys = allViewKeys.filter(k => {
+        const els = elementsByView[k];
+        return Array.isArray(els) && els.length > 0;
       });
+      const primaryKey = customizedKeys[0] ?? allViewKeys[0];
+      const primaryUrl = mockupUrlsByView[primaryKey] ?? Object.values(mockupUrlsByView)[0];
 
-      this.logger.log(`✅ Mockup généré: ${mockupUrl}`);
-
-      // 6. Mettre à jour la personnalisation avec l'URL du mockup
+      // 4. Mettre à jour la personnalisation
       await this.prisma.productCustomization.update({
         where: { id: customization.id },
         data: {
-          previewImageUrl: mockupUrl,
-          finalImageUrlCustom: mockupUrl
+          previewImageUrl: primaryUrl,
+          finalImageUrlCustom: primaryUrl,
+          mockupUrlsByView: mockupUrlsByView as any,
         }
       });
 
-      this.logger.log(`💾 Mockup sauvegardé dans finalImageUrlCustom`);
+      this.logger.log(`💾 ${Object.keys(mockupUrlsByView).length} mockup(s) sauvegardés dans mockupUrlsByView`);
 
       return {
         success: true,
         customizationId: customization.id,
-        finalImageUrlCustom: mockupUrl,
-        message: 'Mockup régénéré avec succès'
+        finalImageUrlCustom: primaryUrl,
+        mockupUrlsByView,
+        message: `Mockups régénérés avec succès (${Object.keys(mockupUrlsByView).length} vue(s))`
       };
 
     } catch (error) {

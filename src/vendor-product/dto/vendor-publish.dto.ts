@@ -453,6 +453,12 @@ export class CreateDesignDto {
   @IsString()
   category: string;
 
+  @ApiProperty({ example: 1, required: false, description: 'ID numérique de la catégorie de design (prioritaire sur category)' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  categoryId?: number;
+
   @ApiProperty({ example: 'data:image/png;base64,iVBORw0K...' })
   @IsString()
   imageBase64: string;

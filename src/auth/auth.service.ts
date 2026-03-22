@@ -12,6 +12,7 @@ import { MailService } from '../core/mail/mail.service';
 import { CloudinaryService } from '../core/cloudinary/cloudinary.service';
 import { OtpService } from './otp/otp.service';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
 import { Role, VendeurType } from '@prisma/client';
 import { RegisterVendorDto } from './dto/register-vendor.dto';
 
@@ -483,7 +484,7 @@ export class AuthService {
     //  📥  Inscription Vendeur (public)
     // =======================
     async registerVendor(dto: RegisterVendorDto) {
-        const { email, password, firstName, lastName, vendeur_type } = dto;
+        const { email, password, firstName, lastName, vendeur_type, shop_name } = dto;
 
         // 👉 1. Valider présence des champs obligatoires
         if (!email || !password || !firstName || !lastName || !vendeur_type) {
@@ -494,6 +495,14 @@ export class AuthService {
         const exists = await this.prisma.user.findUnique({ where: { email } });
         if (exists) {
             throw new BadRequestException('Email déjà utilisé');
+        }
+
+        // Vérifier l'unicité du shop_name si fourni
+        if (shop_name) {
+            const shopExists = await this.prisma.user.findUnique({ where: { shop_name } });
+            if (shopExists) {
+                throw new BadRequestException('Ce nom de boutique est déjà utilisé');
+            }
         }
 
         // Vérifier rapidement la robustesse du mot de passe (≥ 8 caractères)
@@ -513,7 +522,8 @@ export class AuthService {
                 lastName,
                 role: Role.VENDEUR,
                 vendeur_type: vendeur_type as any,
-                status: false, // en attente d'activation
+                status: false, // en attente d'activation admin
+                shop_name: shop_name || null,
             },
             select: {
                 id: true,
@@ -527,23 +537,19 @@ export class AuthService {
             }
         });
 
-        // Notifier les SuperAdmin réels (tous comptes role=SUPERADMIN actifs)
+        // Notifier les SuperAdmin
         try {
-            // Récupérer les emails des superadmins depuis la base
             const superAdmins = await this.prisma.user.findMany({
                 where: { role: Role.SUPERADMIN, status: true },
                 select: { email: true }
             });
 
             const emailsToNotify = superAdmins.map(sa => sa.email);
-
-            // Si aucun compte superadmin trouvé, fallback à la variable d'env
             const fallback = process.env.SUPERADMIN_EMAIL;
             if (emailsToNotify.length === 0 && fallback) {
                 emailsToNotify.push(fallback);
             }
 
-            // Envoyer la notification à chaque superadmin
             for (const adminEmail of emailsToNotify) {
                 await this.mailService.sendNotificationEmail(
                     adminEmail,
@@ -559,6 +565,88 @@ export class AuthService {
             success: true,
             message: 'Votre compte a été créé. Il sera activé prochainement par le SuperAdmin.'
         };
+    }
+
+    // =======================
+    //  📧  Vérification OTP d'inscription
+    // =======================
+    async verifyRegistrationOtp(dto: VerifyRegistrationOtpDto) {
+        const { userId, code } = dto;
+
+        // Vérifier que l'utilisateur existe et attend la vérification
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, email: true, firstName: true, email_verified: true, role: true }
+        });
+
+        if (!user) {
+            throw new BadRequestException('Utilisateur introuvable');
+        }
+
+        if (user.role !== Role.VENDEUR) {
+            throw new BadRequestException('Cette vérification est réservée aux vendeurs');
+        }
+
+        if (user.email_verified) {
+            throw new BadRequestException('Cet email a déjà été vérifié');
+        }
+
+        // Vérifier le code OTP
+        await this.otpService.verifyOTP(userId, code);
+
+        // Marquer l'email comme vérifié
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: { email_verified: true }
+        });
+
+        // Notifier les SuperAdmin pour activer le compte
+        try {
+            const superAdmins = await this.prisma.user.findMany({
+                where: { role: Role.SUPERADMIN, status: true },
+                select: { email: true }
+            });
+
+            const emailsToNotify = superAdmins.map(sa => sa.email);
+            const fallback = process.env.SUPERADMIN_EMAIL;
+            if (emailsToNotify.length === 0 && fallback) {
+                emailsToNotify.push(fallback);
+            }
+
+            for (const adminEmail of emailsToNotify) {
+                await this.mailService.sendNotificationEmail(
+                    adminEmail,
+                    'Nouveau vendeur à activer',
+                    `<p>Un nouveau compte vendeur (<strong>${user.email}</strong>) a vérifié son email et attend votre activation.</p>`
+                );
+            }
+        } catch (e) {
+            console.warn('Notification admin non envoyée:', e.message);
+        }
+
+        return {
+            success: true,
+            message: 'Email vérifié avec succès. Votre compte est en attente d\'activation par l\'administrateur.'
+        };
+    }
+
+    // =======================
+    //  🔄  Renvoi OTP d'inscription
+    // =======================
+    async resendRegistrationOtp(userId: number) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, email: true, firstName: true, email_verified: true, role: true }
+        });
+
+        if (!user) throw new BadRequestException('Utilisateur introuvable');
+        if (user.role !== Role.VENDEUR) throw new BadRequestException('Cette action est réservée aux vendeurs');
+        if (user.email_verified) throw new BadRequestException('Cet email a déjà été vérifié');
+
+        const otpCode = await this.otpService.createOTP(userId);
+        await this.mailService.sendEmailVerificationOTP(user.email, user.firstName, otpCode);
+
+        return { success: true, message: 'Un nouveau code a été envoyé à votre adresse email.' };
     }
 
     // =======================

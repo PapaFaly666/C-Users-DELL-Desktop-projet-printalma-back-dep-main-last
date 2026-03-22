@@ -1,10 +1,13 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CloudinaryService } from '../core/cloudinary/cloudinary.service';
 import { CreateDesignCategoryDto, UpdateDesignCategoryDto, ListDesignCategoriesQueryDto, DesignCategoryResponseDto } from './dto/create-design-category.dto';
+import { VendorProductStatus } from '@prisma/client';
 
 @Injectable()
 export class DesignCategoryService {
+  private readonly logger = new Logger(DesignCategoryService.name);
+
   constructor(
     private prisma: PrismaService,
     private cloudinaryService: CloudinaryService,
@@ -543,6 +546,79 @@ export class DesignCategoryService {
   /**
    * Récupérer les catégories actives pour les vendeurs (endpoint public)
    */
+  /**
+   * Catégories actives liées à au moins un produit vendeur actif
+   * Approche simple en 3 étapes :
+   * 1. Produits vendeur actifs → leurs designId
+   * 2. Designs correspondants → leurs categoryId
+   * 3. DesignCategories actives avec ces IDs
+   */
+  async getActiveCategoriesWithProducts(): Promise<{ id: number; name: string; slug: string }[]> {
+    try {
+      // Étape 1 : récupérer les designId des produits vendeur actifs
+      const activeVendorProducts = await this.prisma.vendorProduct.findMany({
+        where: {
+          isDelete: false,
+          designId: { not: null },
+          status: {
+            notIn: [
+              VendorProductStatus.DRAFT,
+              VendorProductStatus.REJECTED,
+              VendorProductStatus.ERROR,
+            ],
+          },
+        },
+        select: { designId: true },
+        distinct: ['designId'],
+      });
+
+      const designIds = activeVendorProducts
+        .map(vp => vp.designId)
+        .filter((id): id is number => id !== null);
+
+      if (designIds.length === 0) {
+        this.logger.log('getActiveCategoriesWithProducts: aucun produit vendeur actif avec design');
+        return [];
+      }
+
+      // Étape 2 : récupérer les categoryId des designs concernés
+      const designs = await this.prisma.design.findMany({
+        where: {
+          id: { in: designIds },
+          isDelete: false,
+          categoryId: { not: null },
+        },
+        select: { categoryId: true },
+        distinct: ['categoryId'],
+      });
+
+      const categoryIds = designs
+        .map(d => d.categoryId)
+        .filter((id): id is number => id !== null);
+
+      if (categoryIds.length === 0) {
+        this.logger.log('getActiveCategoriesWithProducts: aucun design avec catégorie assignée');
+        return [];
+      }
+
+      // Étape 3 : récupérer les catégories actives parmi ces IDs
+      const categories = await this.prisma.designCategory.findMany({
+        where: {
+          id: { in: categoryIds },
+          isActive: true,
+        },
+        select: { id: true, name: true, slug: true, sortOrder: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      });
+
+      this.logger.log(`✅ getActiveCategoriesWithProducts: ${categories.length} catégorie(s) trouvée(s)`);
+      return categories;
+    } catch (error) {
+      this.logger.error('❌ getActiveCategoriesWithProducts error:', error);
+      return [];
+    }
+  }
+
   async getActiveCategories(): Promise<DesignCategoryResponseDto[]> {
     try {
       const categories = await this.prisma.designCategory.findMany({

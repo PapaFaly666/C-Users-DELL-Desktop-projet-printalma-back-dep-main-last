@@ -18,6 +18,7 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RealBestSellersService } from './services/real-best-sellers.service';
 import { SalesStatsUpdaterService } from './services/sales-stats-updater.service';
+import { PrismaService } from '../prisma.service';
 
 @ApiTags('Administration - Meilleures Ventes')
 @Controller('admin/best-sellers')
@@ -29,6 +30,7 @@ export class AdminBestSellersController {
   constructor(
     private readonly realBestSellersService: RealBestSellersService,
     private readonly salesStatsUpdaterService: SalesStatsUpdaterService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -292,6 +294,92 @@ export class AdminBestSellersController {
       this.logger.error('❌ Erreur génération rapport performance:', error);
       throw error;
     }
+  }
+
+  // ============================================
+  // GESTION DES PRODUITS MIS EN AVANT (PAYANTS)
+  // ============================================
+
+  /**
+   * 🌟 Marquer un produit comme "mis en avant" (système payant)
+   * POST /admin/best-sellers/featured/set
+   * Body: { productId, rank, durationDays }
+   */
+  @Post('featured/set')
+  @ApiOperation({
+    summary: 'Mettre en avant un produit (payant)',
+    description: 'Marque un produit comme featured avec un rang et une durée. Rang 1 = premier affiché.'
+  })
+  async setFeaturedProduct(
+    @Body() body: {
+      productId: number;
+      rank: number;
+      durationDays?: number; // Nombre de jours de mise en avant (défaut: 30)
+    }
+  ) {
+    const { productId, rank, durationDays = 30 } = body;
+    this.logger.log(`🌟 Mise en avant produit ${productId} au rang ${rank} pour ${durationDays} jours`);
+
+    const featuredUntil = new Date();
+    featuredUntil.setDate(featuredUntil.getDate() + durationDays);
+
+    const product = await this.prisma.vendorProduct.update({
+      where: { id: productId },
+      data: {
+        isFeatured: true,
+        featuredRank: rank,
+        featuredUntil,
+        featuredPaidAt: new Date()
+      },
+      select: { id: true, name: true, isFeatured: true, featuredRank: true, featuredUntil: true }
+    });
+
+    return {
+      success: true,
+      message: `Produit mis en avant jusqu'au ${featuredUntil.toLocaleDateString('fr-FR')}`,
+      data: product
+    };
+  }
+
+  /**
+   * 🚫 Retirer un produit de la mise en avant
+   * POST /admin/best-sellers/featured/remove
+   */
+  @Post('featured/remove')
+  @ApiOperation({ summary: 'Retirer la mise en avant d\'un produit' })
+  async removeFeaturedProduct(@Body() body: { productId: number }) {
+    const product = await this.prisma.vendorProduct.update({
+      where: { id: body.productId },
+      data: { isFeatured: false, featuredRank: null, featuredUntil: null },
+      select: { id: true, name: true }
+    });
+
+    return { success: true, message: 'Mise en avant retirée', data: product };
+  }
+
+  /**
+   * 📋 Lister tous les produits mis en avant
+   * GET /admin/best-sellers/featured/list
+   */
+  @Get('featured/list')
+  @ApiOperation({ summary: 'Liste des produits mis en avant (actifs et expirés)' })
+  async listFeaturedProducts() {
+    const now = new Date();
+    const [active, expired] = await Promise.all([
+      this.prisma.vendorProduct.findMany({
+        where: { isFeatured: true, featuredUntil: { gt: now }, isDelete: false },
+        orderBy: { featuredRank: 'asc' },
+        select: { id: true, name: true, featuredRank: true, featuredUntil: true, featuredPaidAt: true, status: true }
+      }),
+      this.prisma.vendorProduct.findMany({
+        where: { isFeatured: true, featuredUntil: { lte: now }, isDelete: false },
+        orderBy: { featuredUntil: 'desc' },
+        take: 20,
+        select: { id: true, name: true, featuredRank: true, featuredUntil: true, featuredPaidAt: true, status: true }
+      })
+    ]);
+
+    return { success: true, data: { active, expired } };
   }
 
   // ============================================

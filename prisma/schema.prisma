@@ -602,6 +602,10 @@ model VendorProduct {
   isBestSeller             Boolean                  @default(false) @map("is_best_seller")
   bestSellerRank           Int?                     @map("best_seller_rank")
   bestSellerCategory       String?                  @map("best_seller_category")
+  isFeatured               Boolean                  @default(false) @map("is_featured")
+  featuredRank             Int?                     @map("featured_rank")
+  featuredUntil            DateTime?                @map("featured_until")
+  featuredPaidAt           DateTime?                @map("featured_paid_at")
   viewsCount               Int                      @default(0) @map("views_count")
   designWidth              Int?                     @map("design_width")
   designHeight             Int?                     @map("design_height")
@@ -651,6 +655,8 @@ model VendorProduct {
   @@index([postValidationAction])
   @@index([isBestSeller])
   @@index([bestSellerRank])
+  @@index([isFeatured])
+  @@index([featuredRank])
   @@index([salesCount])
   @@index([totalRevenue])
   @@index([lastSaleDate])
@@ -1005,7 +1011,8 @@ model ProductCustomization {
   designElements      Json           @map("design_elements")
   sizeSelections      Json?          @map("size_selections")
   previewImageUrl     String?        @map("preview_image_url")
-  finalImageUrlCustom String?        @map("final_image_url_custom")
+  finalImageUrlCustom  String?        @map("final_image_url_custom")
+  mockupUrlsByView     Json?          @map("mockup_urls_by_view")
   totalPrice          Decimal        @default(0) @map("total_price") @db.Decimal(10, 2)
   status              String         @default("draft")
   orderId             Int?           @map("order_id")
@@ -1923,6 +1930,18 @@ model SectionText {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("section_texts")
+}
+
+/// Termes de recherche avec comptage de clics
+model SearchTerm {
+  id         Int      @id @default(autoincrement())
+  term       String   @unique @db.VarChar(255)
+  clickCount Int      @default(1) @map("click_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([clickCount])
+  @@map("search_terms")
 }
 
 /// Options de genre pour les produits (liste extensible)
