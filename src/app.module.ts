@@ -50,6 +50,7 @@ import { AdminSettingsModule } from './admin-settings/admin-settings.module';
 import { VendorStatsModule } from './vendor-stats/vendor-stats.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { FontsModule } from './fonts/fonts.module';
+import { CustomerModule } from './customer/customer.module';
 
 @Module({
   imports: [
@@ -101,6 +102,7 @@ import { FontsModule } from './fonts/fonts.module';
     VendorStatsModule, // Module des statistiques vendeur
     PermissionsModule, // Module de gestion des permissions et rôles
     FontsModule,
+    CustomerModule,
   ],
   controllers: [AppController, SizeController],
   providers: [AppService, PrismaService, SizeService],
