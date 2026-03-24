@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
@@ -112,5 +112,84 @@ export class CustomerService {
         email: user.email,
       },
     };
+  }
+
+  async getProfile(userId: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, firstName: true, lastName: true, email: true, phone: true, address: true, country: true },
+    });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+    return user;
+  }
+
+  async updateProfile(userId: number, data: { firstName?: string; lastName?: string; phone?: string; address?: string; country?: string }) {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data,
+      select: { id: true, firstName: true, lastName: true, email: true, phone: true, address: true, country: true },
+    });
+    return user;
+  }
+
+  async changePassword(userId: number, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+
+    const isValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isValid) throw new BadRequestException('Mot de passe actuel incorrect');
+
+    if (newPassword.length < 6) throw new BadRequestException('Le nouveau mot de passe doit contenir au moins 6 caractères');
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({ where: { id: userId }, data: { password: hashed } });
+    return { message: 'Mot de passe modifié avec succès' };
+  }
+
+  async getFavorites(userId: number): Promise<number[]> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { favorites: true } });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+    return (user.favorites as number[]) || [];
+  }
+
+  async addFavorite(userId: number, productId: number): Promise<number[]> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { favorites: true } });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+    const current = (user.favorites as number[]) || [];
+    if (!current.includes(productId)) {
+      const updated = [...current, productId];
+      await this.prisma.user.update({ where: { id: userId }, data: { favorites: updated } });
+      return updated;
+    }
+    return current;
+  }
+
+  async removeFavorite(userId: number, productId: number): Promise<number[]> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { favorites: true } });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+    const current = (user.favorites as number[]) || [];
+    const updated = current.filter(id => id !== productId);
+    await this.prisma.user.update({ where: { id: userId }, data: { favorites: updated } });
+    return updated;
+  }
+
+  async getHistory(userId: number): Promise<any[]> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { browsing_history: true } });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+    return (user.browsing_history as any[]) || [];
+  }
+
+  async addToHistory(userId: number, item: { productId: number; name: string; imageUrl?: string; price?: number; viewedAt: string }): Promise<any[]> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { browsing_history: true } });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+    let history = (user.browsing_history as any[]) || [];
+    // Remove existing entry for same product
+    history = history.filter(h => h.productId !== item.productId);
+    // Add new entry at start
+    history.unshift(item);
+    // Keep max 4 entries
+    if (history.length > 4) history = history.slice(0, 4);
+    await this.prisma.user.update({ where: { id: userId }, data: { browsing_history: history } });
+    return history;
   }
 }

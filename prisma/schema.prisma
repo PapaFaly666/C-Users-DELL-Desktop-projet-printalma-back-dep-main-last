@@ -49,6 +49,8 @@ model User {
   onboarding_completed_at DateTime?               @map("onboarding_completed_at")
   activation_code         String?
   activation_code_expires DateTime?
+  favorites               Json?                   @default("[]")
+  browsing_history        Json?                   @default("[]") @map("browsing_history")
   is_deleted              Boolean                 @default(false)
   deleted_at              DateTime?
   deleted_by              Int?

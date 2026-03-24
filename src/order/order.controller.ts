@@ -227,8 +227,8 @@ export class OrderController {
     if (req.user.role === 'VENDEUR') {
       orders = await this.orderService.getVendorOrders(req.user.sub);
     } else {
-      // Sinon, commandes normales (client)
-      orders = await this.orderService.getUserOrders(req.user.sub);
+      // Sinon, commandes normales (client) - chercher aussi par email pour les commandes invitées
+      orders = await this.orderService.getUserOrders(req.user.sub, req.user.email);
     }
 
     // Calculer les statistiques

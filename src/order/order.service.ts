@@ -1251,14 +1251,24 @@ export class OrderService {
     }
   }
 
-  async getUserOrders(userId: number) {
+  async getUserOrders(userId: number, email?: string) {
+    // Chercher les commandes liées au userId OU les commandes invitées avec le même email
+    const whereClause: any = email
+      ? {
+          OR: [
+            { userId },
+            { userId: null, email }
+          ]
+        }
+      : { userId };
+
     const orders = await this.prisma.order.findMany({
-      where: { userId },
+      where: whereClause,
       include: {
         orderItems: {
           include: {
             product: true,
-            stickerProduct: { // 🆕 Inclure le sticker
+            stickerProduct: {
               include: {
                 vendor: {
                   select: {
@@ -1278,18 +1288,29 @@ export class OrderService {
             colorVariation: true,
           },
         },
-        // 🆕 Inclure l'historique des tentatives de paiement
         paymentAttemptsHistory: {
           orderBy: {
             attemptedAt: 'desc',
           },
-          take: 3, // Dernières 3 tentatives
+          take: 3,
         },
       },
       orderBy: {
         createdAt: 'desc',
       },
     });
+
+    // Lier automatiquement les commandes invitées au compte client
+    const guestOrderIds = orders
+      .filter(o => o.userId === null && o.email === email)
+      .map(o => o.id);
+
+    if (guestOrderIds.length > 0) {
+      await this.prisma.order.updateMany({
+        where: { id: { in: guestOrderIds } },
+        data: { userId }
+      }).catch(() => {}); // Ne pas bloquer si l'update échoue
+    }
 
     return orders.map(order => this.formatOrderResponse(order));
   }
