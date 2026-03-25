@@ -40,15 +40,15 @@ export class CreateDesignDto {
   description?: string;
 
   @ApiProperty({
-    description: 'Prix en FCFA',
+    description: 'Prix en FCFA (0 pour gratuit)',
     example: 2500,
-    minimum: 100,
+    minimum: 0,
     maximum: 1000000,
     type: 'number'
   })
   @IsNotEmpty({ message: 'Le prix est requis' })
   @IsNumber({}, { message: 'Le prix doit être un nombre' })
-  @Min(100, { message: 'Le prix minimum est de 100 FCFA' })
+  @Min(0, { message: 'Le prix ne peut pas être négatif' })
   @Max(1000000, { message: 'Le prix maximum est de 1,000,000 FCFA' })
   @Transform(({ value }) => {
     if (typeof value === 'string') {

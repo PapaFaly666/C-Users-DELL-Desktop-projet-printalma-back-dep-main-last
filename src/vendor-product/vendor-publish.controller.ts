@@ -447,12 +447,14 @@ export class VendorPublishController {
     @Request() req: any
   ) {
     const vendorId = req.user.sub;
+    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPERADMIN';
     this.logger.log(`📍 Sauvegarde position design par vendeur ${vendorId}`);
-    
+
     try {
       const result = await this.vendorPublishService.saveDesignPosition(
         vendorId,
-        positionData
+        positionData,
+        isAdmin
       );
       return {
         success: true,

@@ -1,7 +1,7 @@
 import { IsEmail, IsNotEmpty, IsString, IsOptional, MinLength, IsEnum, IsBoolean, IsNumber, Min, Max, IsInt, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { VendeurType } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 export class CreateClientDto {
   @ApiProperty({ example: 'Jean' })
@@ -19,15 +19,15 @@ export class CreateClientDto {
   @IsNotEmpty({ message: 'Email est requis' })
   email: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     example: 'DESIGNER',
-    description: 'Type de vendeur : DESIGNER, INFLUENCEUR ou ARTISTE',
+    description: 'Type de vendeur : DESIGNER, INFLUENCEUR ou ARTISTE (non requis pour vendeur Printalma)',
     enum: VendeurType,
-    required: true
+    required: false
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsEnum(VendeurType, { message: 'Le type de vendeur doit être DESIGNER, INFLUENCEUR ou ARTISTE' })
-  vendeur_type: VendeurType;
+  vendeur_type?: VendeurType;
 
   // 🆕 NOUVEAUX CHAMPS POUR PROFIL VENDEUR ÉTENDU
   @ApiProperty({ 
@@ -58,14 +58,20 @@ export class CreateClientDto {
   @IsString()
   address?: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     example: 'Boutique Design Jean',
-    description: 'Nom de la boutique (obligatoire)',
-    required: true
+    description: 'Nom de la boutique (non requis pour vendeur Printalma)',
+    required: false
   })
-  @IsNotEmpty({ message: 'Le nom de la boutique est requis' })
+  @IsOptional()
   @IsString()
-  shop_name: string;
+  shop_name?: string;
+
+  @ApiProperty({ example: false, description: 'Vendeur Printalma (validation automatique des designs, prix gratuit)', required: false })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  isPrintalmaVendor?: boolean;
 }
 
 export class ChangePasswordDto {

@@ -55,7 +55,7 @@ export class VendorProductValidationController {
   // =================== ENDPOINTS VENDEUR ===================
 
   @Put('post-validation-action/:productId')
-  @Roles('VENDEUR')
+  @Roles('VENDEUR', 'VENDEUR_PRINTALMA')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
     summary: 'Modifier l\'action après validation du design',
@@ -83,7 +83,7 @@ export class VendorProductValidationController {
   }
 
   @Post('publish/:productId')
-  @Roles('VENDEUR')
+  @Roles('VENDEUR', 'VENDEUR_PRINTALMA')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Publier manuellement un produit validé',
@@ -104,7 +104,7 @@ export class VendorProductValidationController {
   // =================== NOUVEAUX ENDPOINTS POUR LA LOGIQUE BROUILLON/PUBLICATION ===================
 
   @Put('set-draft/:productId')
-  @Roles('VENDEUR')
+  @Roles('VENDEUR', 'VENDEUR_PRINTALMA')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: '🎯 Mettre un produit en brouillon ou publier selon validation admin',
@@ -157,7 +157,7 @@ export class VendorProductValidationController {
   }
 
   @Post('publish-direct/:productId')
-  @Roles('VENDEUR')
+  @Roles('VENDEUR', 'VENDEUR_PRINTALMA')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: '🎯 Publier directement selon validation admin',

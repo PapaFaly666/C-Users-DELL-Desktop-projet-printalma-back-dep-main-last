@@ -374,16 +374,23 @@ export class AuthService {
      * Créer un nouveau client (réservé aux admins)
      */
     async createClient(createClientDto: CreateClientDto) {
-        const { 
-            firstName, 
-            lastName, 
-            email, 
+        const {
+            firstName,
+            lastName,
+            email,
             vendeur_type,
             phone,
             country,
             address,
-            shop_name 
+            shop_name,
+            isPrintalmaVendor,
         } = createClientDto;
+
+        // Validation manuelle pour les vendeurs non-Printalma
+        if (!isPrintalmaVendor) {
+            if (!vendeur_type) throw new BadRequestException('Le type de vendeur est requis');
+            if (!shop_name) throw new BadRequestException('Le nom de la boutique est requis');
+        }
 
         // Vérifier si l'email existe déjà
         const existingUser = await this.prisma.user.findUnique({
@@ -432,6 +439,7 @@ export class AuthService {
                     country: country || null,
                     address: address || null,
                     shop_name: shop_name || null,
+                    isPrintalmaVendor: isPrintalmaVendor || false,
                 },
                 select: {
                     id: true,
@@ -442,6 +450,7 @@ export class AuthService {
                     vendeur_type: true,
                     status: true,
                     created_at: true,
+                    isPrintalmaVendor: true,
                     // 🆕 Inclure les nouveaux champs dans la réponse
                     phone: true,
                     country: true,
@@ -773,8 +782,8 @@ export class AuthService {
 
         // Construction de la condition WHERE
         const whereCondition: any = {
-            role: Role.VENDEUR, // On ne veut que les clients (VENDEUR)
-            is_deleted: false // ✅ Exclure les vendeurs supprimés
+            role: { in: [Role.VENDEUR, Role.VENDEUR_PRINTALMA] },
+            is_deleted: false
         };
 
         // Filtrer par statut si spécifié
@@ -818,6 +827,7 @@ export class AuthService {
                         updated_at: true,
                         login_attempts: true,
                         locked_until: true,
+                        isPrintalmaVendor: true,
                     },
                     orderBy: { created_at: 'desc' }, // Les plus récents en premier
                     skip,
@@ -1339,15 +1349,16 @@ export class AuthService {
      * Créer un vendeur avec photo de profil optionnelle (multipart/form-data)
      */
     async createVendorWithPhoto(createClientDto: CreateClientDto, profilePhoto?: Express.Multer.File) {
-        const { 
-            firstName, 
-            lastName, 
-            email, 
+        const {
+            firstName,
+            lastName,
+            email,
             vendeur_type,
             phone,
             country,
             address,
-            shop_name 
+            shop_name,
+            isPrintalmaVendor,
         } = createClientDto;
 
         // Vérifier si l'email existe déjà
@@ -1368,6 +1379,13 @@ export class AuthService {
             if (existingShop) {
                 throw new ConflictException('Ce nom de boutique est déjà utilisé par un autre vendeur');
             }
+        }
+
+        // Validation pour vendeur non-Printalma
+        const isPrintalmaFlag = isPrintalmaVendor === true || (isPrintalmaVendor as any) === 'true';
+        if (!isPrintalmaFlag) {
+            if (!vendeur_type) throw new BadRequestException('Le type de vendeur est requis');
+            if (!shop_name) throw new BadRequestException('Le nom de la boutique est requis');
         }
 
         let profilePhotoUrl = null;
@@ -1394,7 +1412,7 @@ export class AuthService {
                     lastName,
                     email,
                     password: hashedPassword,
-                    role: Role.VENDEUR,
+                    role: isPrintalmaFlag ? Role.VENDEUR_PRINTALMA : Role.VENDEUR,
                     vendeur_type: vendeur_type as any,
                     must_change_password: true,
                     status: true,
@@ -1404,6 +1422,7 @@ export class AuthService {
                     address: address || null,
                     shop_name: shop_name || null,
                     profile_photo_url: profilePhotoUrl,
+                    isPrintalmaVendor: isPrintalmaFlag,
                 },
                 select: {
                     id: true,
@@ -1422,20 +1441,32 @@ export class AuthService {
                 }
             });
 
-            // Envoyer l'email de bienvenue avec les informations étendues
-            await this.mailService.sendVendorWelcomeEmail({
-                email,
-                firstName,
-                lastName,
-                tempPassword: temporaryPassword,
-                shopName: shop_name || 'Votre boutique',
-                vendeur_type: vendeur_type
-            });
+            // Envoyer l'email de bienvenue (non-bloquant)
+            let emailSent = false;
+            try {
+                await this.mailService.sendVendorWelcomeEmail({
+                    email,
+                    firstName,
+                    lastName,
+                    tempPassword: temporaryPassword,
+                    shopName: shop_name || 'Votre boutique',
+                    vendeur_type: vendeur_type
+                });
+                emailSent = true;
+            } catch (mailError) {
+                console.error('⚠️ Erreur envoi email (vendeur créé quand même):', mailError);
+            }
+
+            // Toujours loguer le mot de passe temporaire en console pour l'admin
+            console.log(`\n🔑 MOT DE PASSE TEMPORAIRE pour ${email}: ${temporaryPassword}\n`);
 
             return {
                 success: true,
-                message: 'Vendeur créé avec succès. Un email avec les identifiants a été envoyé.',
-                user: newUser
+                message: emailSent
+                    ? 'Vendeur créé avec succès. Un email avec les identifiants a été envoyé.'
+                    : `Vendeur créé avec succès. Email non envoyé — mot de passe temporaire : ${temporaryPassword}`,
+                user: newUser,
+                ...(emailSent ? {} : { temporaryPassword })
             };
         } catch (error) {
             // Nettoyer la photo uploadée en cas d'erreur

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Query, Logger, ParseIntPipe, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { PrismaService } from '../prisma.service';
 
@@ -316,6 +316,48 @@ export class PublicController {
       }
     }
   })
+  @Get('reviews/:vendorProductId')
+  async getReviews(@Param('vendorProductId', ParseIntPipe) vendorProductId: number) {
+    const reviews = await this.prismaService.review.findMany({
+      where: { vendorProductId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    const total = reviews.length;
+    const average = total > 0
+      ? Math.round((reviews.reduce((sum, r) => sum + r.rating, 0) / total) * 10) / 10
+      : 0;
+    return { reviews, total, average };
+  }
+
+  @Post('reviews/:vendorProductId')
+  async createReview(
+    @Param('vendorProductId', ParseIntPipe) vendorProductId: number,
+    @Body() body: { authorName: string; rating: number; comment?: string },
+  ) {
+    if (!body.authorName || typeof body.rating !== 'number' || body.rating < 1 || body.rating > 5) {
+      throw new BadRequestException('authorName et rating (1-5) sont requis');
+    }
+    const review = await this.prismaService.review.create({
+      data: {
+        vendorProductId,
+        authorName: body.authorName,
+        rating: Math.round(body.rating),
+        comment: body.comment || null,
+      },
+    });
+    // Mettre à jour averageRating sur le produit
+    const allRatings = await this.prismaService.review.aggregate({
+      where: { vendorProductId },
+      _avg: { rating: true },
+    });
+    await this.prismaService.vendorProduct.update({
+      where: { id: vendorProductId },
+      data: { averageRating: allRatings._avg.rating },
+    });
+    return { success: true, data: review };
+  }
+
   async getBestSellersStats() {
     this.logger.log('📊 Récupération des statistiques des meilleures ventes');
 

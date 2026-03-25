@@ -20,7 +20,7 @@ export class VendorGuard implements CanActivate {
       });
     }
 
-    if (![Role.VENDEUR, Role.ADMIN, Role.SUPERADMIN].includes(user.role)) {
+    if (![Role.VENDEUR, Role.VENDEUR_PRINTALMA, Role.ADMIN, Role.SUPERADMIN].includes(user.role)) {
       throw new ForbiddenException({
         error: 'INSUFFICIENT_PERMISSIONS',
         message: 'Cette section est réservée aux vendeurs',

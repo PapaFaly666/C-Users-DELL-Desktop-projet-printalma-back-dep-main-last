@@ -54,6 +54,7 @@ model User {
   is_deleted              Boolean                 @default(false)
   deleted_at              DateTime?
   deleted_by              Int?
+  isPrintalmaVendor       Boolean                 @default(false) @map("is_printalma_vendor")
   validatedDesigns        Design[]                @relation("DesignValidator")
   designs                 Design[]
   createdDesignCategories DesignCategory[]        @relation("DesignCategoryCreator")
@@ -93,6 +94,7 @@ model User {
   stickerFavorites        StickerFavorite[]       @relation("UserStickerFavorites")
   loginOTPs               LoginOTP[]              @relation("UserLoginOTPs")
   appSettingsUpdates      AppSettings[]           @relation("AppSettingsUpdater")
+  reviews                 Review[]                @relation("CustomerReviews")
 
   @@index([country])
   @@index([shop_name])
@@ -643,6 +645,7 @@ model VendorProduct {
   images                   VendorProductImage[]
   customizations           ProductCustomization[]
   sizePrices               VendorProductSizePrice[]
+  reviews                  Review[]
 
   // 🆕 Champs pour les prix par taille
   useGlobalPricing     Boolean @default(false) @map("use_global_pricing")
@@ -1485,6 +1488,7 @@ enum Role {
   SUPPORT
   COMPTABLE
   VENDEUR
+  VENDEUR_PRINTALMA
 }
 
 enum VendeurType {
@@ -1509,6 +1513,7 @@ enum OrderStatus {
   PROCESSING
   SHIPPED
   DELIVERED
+  COMPLETED
   CANCELLED
   REJECTED
 }
@@ -1955,4 +1960,22 @@ model ContentGenreOption {
 
   @@index([value])
   @@map("content_genre_options")
+}
+
+/// Avis clients sur les produits vendeurs
+model Review {
+  id              Int      @id @default(autoincrement())
+  vendorProductId Int      @map("vendor_product_id")
+  customerId      Int?     @map("customer_id")
+  authorName      String   @map("author_name") @db.VarChar(100)
+  rating          Int
+  comment         String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  vendorProduct   VendorProduct @relation(fields: [vendorProductId], references: [id], onDelete: Cascade)
+  customer        User?         @relation("CustomerReviews", fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([vendorProductId])
+  @@index([customerId])
+  @@map("reviews")
 }

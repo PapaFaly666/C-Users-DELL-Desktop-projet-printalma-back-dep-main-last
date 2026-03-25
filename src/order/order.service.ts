@@ -127,12 +127,21 @@ export class OrderService {
         }
 
         if (vendorId) {
-          // Récupérer la commission personnalisée du vendeur directement avec Prisma
-          const vendorCommission = await this.prisma.vendorCommission.findUnique({
-            where: { vendorId }
+          // Vérifier si c'est un VENDEUR_PRINTALMA (pas de commission)
+          const vendor = await this.prisma.user.findUnique({
+            where: { id: vendorId },
+            select: { role: true }
           });
-          if (vendorCommission) {
-            commissionRate = vendorCommission.commissionRate;
+          if (vendor?.role === 'VENDEUR_PRINTALMA') {
+            commissionRate = 0; // Pas de commission pour Printalma vendor
+          } else {
+            // Récupérer la commission personnalisée du vendeur directement avec Prisma
+            const vendorCommission = await this.prisma.vendorCommission.findUnique({
+              where: { vendorId }
+            });
+            if (vendorCommission) {
+              commissionRate = vendorCommission.commissionRate;
+            }
           }
         }
 
@@ -981,6 +990,13 @@ export class OrderService {
                       }
                     }
                   },
+                  images: {
+                    select: {
+                      finalImageUrl: true,
+                      colorId: true,
+                      imageType: true,
+                    }
+                  },
                   design: true
                 }
               },
@@ -1231,7 +1247,15 @@ export class OrderService {
         // 📏 SÉLECTIONS VENDEUR
         selectedSizes: this.parseJsonSafely(vendorProduct.sizes) || [],
         selectedColors: this.parseJsonSafely(vendorProduct.colors) || [],
-        designId: vendorProduct.designId
+        designId: vendorProduct.designId,
+
+        // 🖼️ IMAGES FINALES (avec design appliqué)
+        finalImages: (vendorProduct.images || [])
+          .filter((img: any) => img.finalImageUrl)
+          .map((img: any) => ({
+            colorId: img.colorId,
+            finalImageUrl: img.finalImageUrl,
+          }))
       };
     } catch (error) {
       this.logger.error(`❌ Erreur création données enrichies:`, error);
@@ -1285,7 +1309,28 @@ export class OrderService {
                 }
               }
             },
-            colorVariation: true,
+            colorVariation: {
+              include: {
+                images: true,
+              }
+            },
+            vendorProduct: {
+              include: {
+                images: {
+                  select: {
+                    finalImageUrl: true,
+                    colorId: true,
+                    imageType: true,
+                  }
+                }
+              }
+            },
+            customization: {
+              select: {
+                id: true,
+                previewImageUrl: true,
+              }
+            },
           },
         },
         paymentAttemptsHistory: {
@@ -1375,13 +1420,41 @@ export class OrderService {
         commissionAmount: true,
         vendorAmount: true,
         commissionAppliedAt: true,
+        // 👤 INFORMATIONS CLIENT
+        shippingName: true,
+        email: true,
+        phoneNumber: true,
+        shippingStreet: true,
+        shippingCity: true,
+        shippingRegion: true,
+        shippingAddressFull: true,
         orderItems: {
           select: {
             id: true,
             quantity: true,
             unitPrice: true,
+            totalPrice: true,
+            colorId: true,
+            color: true,
+            size: true,
+            vendorProductId: true,
             product: true,
-            colorVariation: true,
+            colorVariation: {
+              include: { images: true },
+            },
+            vendorProduct: {
+              include: {
+                images: {
+                  select: { finalImageUrl: true, colorId: true, imageType: true },
+                },
+              },
+            },
+            stickerProduct: {
+              select: { id: true, name: true, imageUrl: true },
+            },
+            customization: {
+              select: { id: true, previewImageUrl: true },
+            },
           },
         },
         user: true,
@@ -1481,6 +1554,17 @@ export class OrderService {
               }
             },
             colorVariation: true,
+            vendorProduct: {
+              include: {
+                images: {
+                  select: {
+                    finalImageUrl: true,
+                    colorId: true,
+                    imageType: true,
+                  }
+                }
+              }
+            },
             // 🎨 Inclure les données de personnalisation client
             customization: {
               select: {
@@ -1541,6 +1625,17 @@ export class OrderService {
               }
             },
             colorVariation: true,
+            vendorProduct: {
+              include: {
+                images: {
+                  select: {
+                    finalImageUrl: true,
+                    colorId: true,
+                    imageType: true,
+                  }
+                }
+              }
+            },
             customization: {
               select: {
                 id: true,
@@ -1744,9 +1839,20 @@ export class OrderService {
         }
 
         // ✅ POUR LES PRODUITS NORMAUX
+        // Image finale vendeur (avec design appliqué) pour la couleur commandée
+        const vpImages: any[] = item.vendorProduct?.images || [];
+        const finalImages = vpImages
+          .filter((img: any) => img.finalImageUrl)
+          .map((img: any) => ({ colorId: img.colorId, finalImageUrl: img.finalImageUrl }));
+        const finalProductImageUrl =
+          finalImages.find((img: any) => img.colorId === item.colorId)?.finalImageUrl ||
+          finalImages[0]?.finalImageUrl || null;
+
         return {
           ...baseItem,
           itemType: 'PRODUCT',
+          finalImages,
+          finalProductImageUrl,
           product: {
             ...item.product,
             orderedColorName: item.colorVariation?.name || null,

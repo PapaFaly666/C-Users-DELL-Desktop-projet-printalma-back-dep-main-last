@@ -224,7 +224,7 @@ export class OrderController {
     // L'utilisateur doit être authentifié grâce à JwtAuthGuard
 
     // Si l'utilisateur est un VENDEUR, récupérer les commandes de ses produits
-    if (req.user.role === 'VENDEUR') {
+    if (req.user.role === 'VENDEUR' || req.user.role === 'VENDEUR_PRINTALMA') {
       orders = await this.orderService.getVendorOrders(req.user.sub);
     } else {
       // Sinon, commandes normales (client) - chercher aussi par email pour les commandes invitées
@@ -236,7 +236,7 @@ export class OrderController {
 
     // 💰 Calculer le montant disponible pour les appels de fonds (seulement pour les vendeurs)
     let vendorFinances = null;
-    if (req.user.role === 'VENDEUR') {
+    if (req.user.role === 'VENDEUR' || req.user.role === 'VENDEUR_PRINTALMA') {
       vendorFinances = await this.calculateVendorAvailableFunds(req.user.sub, orders);
 
       // ✅ Mettre à jour les statistiques avec les revenus designs

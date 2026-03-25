@@ -147,6 +147,9 @@ export class VendorOrdersService {
               vendorProduct: {
                 include: {
                   vendor: true,
+                  images: {
+                    select: { finalImageUrl: true, colorId: true, imageType: true },
+                  },
                 },
               },
             },
@@ -212,6 +215,9 @@ export class VendorOrdersService {
             vendorProduct: {
               include: {
                 vendor: true,
+                images: {
+                  select: { finalImageUrl: true, colorId: true, imageType: true },
+                },
               },
             },
           },
@@ -500,6 +506,18 @@ export class VendorOrdersService {
           totalPrice: item.totalPrice || (item.unitPrice * item.quantity),
           colorId: item.colorId,
           color: item.color,
+
+          // 🖼️ Image finale vendeur (avec design appliqué)
+          ...(() => {
+            const vpImages: any[] = item.vendorProduct?.images || [];
+            const finalImages = vpImages
+              .filter((img: any) => img.finalImageUrl)
+              .map((img: any) => ({ colorId: img.colorId, finalImageUrl: img.finalImageUrl }));
+            const finalProductImageUrl =
+              finalImages.find((img: any) => img.colorId === item.colorId)?.finalImageUrl ||
+              finalImages[0]?.finalImageUrl || null;
+            return { finalImages, finalProductImageUrl };
+          })(),
 
           product: {
             ...item.product,

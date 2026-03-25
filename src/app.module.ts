@@ -51,6 +51,7 @@ import { VendorStatsModule } from './vendor-stats/vendor-stats.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { FontsModule } from './fonts/fonts.module';
 import { CustomerModule } from './customer/customer.module';
+import { PublicModule } from './public/public.module';
 
 @Module({
   imports: [
@@ -103,6 +104,7 @@ import { CustomerModule } from './customer/customer.module';
     PermissionsModule, // Module de gestion des permissions et rôles
     FontsModule,
     CustomerModule,
+    PublicModule,
   ],
   controllers: [AppController, SizeController],
   providers: [AppService, PrismaService, SizeService],

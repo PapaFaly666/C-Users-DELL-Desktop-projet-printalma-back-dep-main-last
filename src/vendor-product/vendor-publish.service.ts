@@ -41,6 +41,13 @@ export class VendorPublishService {
   ): Promise<VendorPublishResponseDto> {
     this.logger.log(`📦 Publication produit vendeur par vendeur ${vendorId}`);
 
+    // Vérifier si le vendeur est un vendeur Printalma
+    const vendorUser = await this.prisma.user.findUnique({
+      where: { id: vendorId },
+      select: { isPrintalmaVendor: true, role: true },
+    });
+    const isPrintalmaVendor = vendorUser?.isPrintalmaVendor === true || vendorUser?.role === 'VENDEUR_PRINTALMA';
+
     try {
       // ✅ VALIDATION: Structure produit admin
       await this.validateAdminProductStructure(publishDto.productStructure.adminProduct);
@@ -192,11 +199,13 @@ export class VendorPublishService {
 
           // ✅ STATUT ET VALIDATION
           status: publishDto.forcedStatus || (
+            isPrintalmaVendor ? 'PUBLISHED' :
             design.isValidated ? (
               publishDto.postValidationAction === 'TO_DRAFT' ? 'DRAFT' : 'PUBLISHED'
             ) : 'PENDING'
           ),
-          isValidated: design.isValidated,
+          isValidated: isPrintalmaVendor ? true : design.isValidated,
+          validatedAt: isPrintalmaVendor ? new Date() : undefined,
           postValidationAction: publishDto.postValidationAction || 'AUTO_PUBLISH',
 
           // ✅ MÉTADONNÉES COMPATIBILITÉ
@@ -1887,6 +1896,10 @@ export class VendorPublishService {
     this.logger.log(`🎨 Création design par vendeur ${vendorId}`);
     this.logger.log(`💰 Prix reçu: ${designData.price} (type: ${typeof designData.price})`);
 
+    // Forcer prix=0 pour les vendeurs Printalma
+    const vendorForDesign = await this.prisma.user.findUnique({ where: { id: vendorId }, select: { isPrintalmaVendor: true, role: true } });
+    const isDesignPrintalmaVendor = vendorForDesign?.isPrintalmaVendor === true || vendorForDesign?.role === 'VENDEUR_PRINTALMA';
+
     try {
       // ✅ VALIDATION: Image fournie
       if (!designData.imageBase64) {
@@ -1927,7 +1940,7 @@ export class VendorPublishService {
           vendorId: vendorId,
           name: designData.name,
           description: designData.description || '',
-          price: designData.price !== undefined ? designData.price : 0,
+          price: isDesignPrintalmaVendor ? 0 : (designData.price !== undefined ? designData.price : 0),
           categoryId: (designData as any).categoryId ?? this.getCategoryId(designData.category),
           imageUrl: uploadResult.secure_url,
           thumbnailUrl: uploadResult.secure_url,
@@ -2148,7 +2161,8 @@ export class VendorPublishService {
    */
   async saveDesignPosition(
     vendorId: number,
-    positionData: SaveDesignPositionDto
+    positionData: SaveDesignPositionDto,
+    isAdmin: boolean = false
   ): Promise<{
     vendorProductId: number;
     designId: number;
@@ -2157,24 +2171,22 @@ export class VendorPublishService {
     this.logger.log(`📍 Sauvegarde position design: vendorId=${vendorId}, productId=${positionData.vendorProductId}, designId=${positionData.designId}`);
 
     try {
-      // ✅ VALIDATION: Vérifier que le produit appartient au vendeur
+      // ✅ VALIDATION: Vérifier que le produit existe (admins peuvent modifier n'importe quel produit)
       const vendorProduct = await this.prisma.vendorProduct.findFirst({
-        where: {
-          id: positionData.vendorProductId,
-          vendorId: vendorId
-        }
+        where: isAdmin
+          ? { id: positionData.vendorProductId }
+          : { id: positionData.vendorProductId, vendorId: vendorId }
       });
 
       if (!vendorProduct) {
         throw new ForbiddenException('Ce produit ne vous appartient pas');
       }
 
-      // ✅ VALIDATION: Vérifier que le design existe et appartient au vendeur
+      // ✅ VALIDATION: Vérifier que le design existe (admins peuvent utiliser n'importe quel design)
       const design = await this.prisma.design.findFirst({
-        where: {
-          id: positionData.designId,
-          vendorId: vendorId
-        }
+        where: isAdmin
+          ? { id: positionData.designId }
+          : { id: positionData.designId, vendorId: vendorId }
       });
 
       if (!design) {
@@ -2193,7 +2205,7 @@ export class VendorPublishService {
       });
 
       const result = await this.designPositionService.upsertPosition(
-        vendorId,
+        vendorProduct.vendorId,
         vendorProduct.id,
         design.id,
         {

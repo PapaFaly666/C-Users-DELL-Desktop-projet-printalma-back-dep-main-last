@@ -31,9 +31,16 @@ export class DesignService {
     this.validateFile(file);
 
     // Traitement des tags
-    const tags = createDesignDto.tags 
+    const tags = createDesignDto.tags
       ? createDesignDto.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
       : [];
+
+    // Vérifier si le vendeur est un vendeur Printalma (validation automatique)
+    const vendor = await this.prisma.user.findUnique({
+      where: { id: vendorId },
+      select: { isPrintalmaVendor: true },
+    });
+    const isPrintalmaVendor = vendor?.isPrintalmaVendor === true;
 
     try {
       // Upload de l'image originale
@@ -77,7 +84,7 @@ export class DesignService {
           vendorId,
           name: createDesignDto.name,
           description: createDesignDto.description || null,
-          price: createDesignDto.price,
+          price: isPrintalmaVendor ? 0 : createDesignDto.price,
           categoryId: createDesignDto.categoryId,
           imageUrl: originalUpload.secure_url,
           thumbnailUrl: thumbnailUpload.secure_url,
@@ -88,9 +95,12 @@ export class DesignService {
           dimensions,
           format: originalUpload.format,
           tags,
-          isDraft: true,
-          isPublished: false,
+          isDraft: !isPrintalmaVendor,
+          isPublished: isPrintalmaVendor,
           isPending: false,
+          isValidated: isPrintalmaVendor,
+          validatedAt: isPrintalmaVendor ? new Date() : null,
+          publishedAt: isPrintalmaVendor ? new Date() : null,
         },
         include: {
           vendor: {

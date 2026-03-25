@@ -102,7 +102,6 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'http://localhost:5174',
-      'https://printalma-website-dep.onrender.com',
       process.env.FRONTEND_URL
     ].filter(Boolean),
     credentials: true, // Important pour les cookies
