@@ -237,35 +237,18 @@ export class SuperadminDashboardService {
       artists: 0,
     };
 
-    const designersCount = await this.prisma.user.count({
-      where: {
-        role: 'VENDEUR',
-        is_deleted: false,
-        vendorType: {
-          label: 'DESIGNER',
-        },
-      },
-    });
-
-    const influencersCount = await this.prisma.user.count({
-      where: {
-        role: 'VENDEUR',
-        is_deleted: false,
-        vendorType: {
-          label: 'INFLUENCEUR',
-        },
-      },
-    });
-
-    const artistsCount = await this.prisma.user.count({
-      where: {
-        role: 'VENDEUR',
-        is_deleted: false,
-        vendorType: {
-          label: 'ARTISTE',
-        },
-      },
-    });
+    // Compter par champ enum vendeur_type (utilisé à l'inscription)
+    const [designersCount, influencersCount, artistsCount] = await Promise.all([
+      this.prisma.user.count({
+        where: { role: 'VENDEUR', is_deleted: false, vendeur_type: 'DESIGNER' },
+      }),
+      this.prisma.user.count({
+        where: { role: 'VENDEUR', is_deleted: false, vendeur_type: 'INFLUENCEUR' },
+      }),
+      this.prisma.user.count({
+        where: { role: 'VENDEUR', is_deleted: false, vendeur_type: 'ARTISTE' },
+      }),
+    ]);
 
     vendorsByType.designers = designersCount;
     vendorsByType.influencers = influencersCount;
