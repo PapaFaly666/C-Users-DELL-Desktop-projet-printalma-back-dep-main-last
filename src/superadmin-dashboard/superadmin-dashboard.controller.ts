@@ -7,7 +7,7 @@ import { SuperadminDashboardDto, MonthlyRevenueDto } from './dto/dashboard-stats
 
 @Controller('superadmin')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SUPERADMIN') // Seulement accessible aux superadmins
+@Roles('SUPERADMIN', 'ADMIN')
 export class SuperadminDashboardController {
   constructor(
     private readonly dashboardService: SuperadminDashboardService,

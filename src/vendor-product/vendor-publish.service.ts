@@ -742,7 +742,14 @@ export class VendorPublishService {
                 }))
               }))
             };
-          })
+          }),
+          requiresStock: (product.baseProduct as any).requiresStock ?? true,
+          // 📦 Stocks par couleur et taille
+          stocks: ((product.baseProduct as any).stocks || []).map((s: any) => ({
+            colorId: s.colorId,
+            sizeName: s.sizeName,
+            stock: s.stock
+          }))
         },
 
         // ✅ APPLICATION DESIGN COMPLÈTE avec Cloudinary URL
@@ -2875,7 +2882,8 @@ export class VendorPublishService {
                 }
               },
               sizes: true,
-              sizePrices: true
+              sizePrices: true,
+              stocks: true
             }
           },
           design: true,
@@ -3277,6 +3285,7 @@ export class VendorPublishService {
         description: product.baseProduct.description,
         price: product.baseProduct.price,
         genre: product.baseProduct.genre,
+        requiresStock: product.baseProduct.requiresStock ?? true,
         // ✅ AJOUT: Inclure finalUrlImage pour chaque couleur
         colorVariations: (product.baseProduct.colorVariations || []).map((cv: any) => {
           // Trouver l'image finale pour cette couleur dans les images du vendorProduct
@@ -3289,7 +3298,13 @@ export class VendorPublishService {
             finalUrlImage: finalImageForColor?.finalImageUrl || null
           };
         }),
-        sizes: product.baseProduct.sizes || []
+        sizes: product.baseProduct.sizes || [],
+        // 📦 Stocks par couleur et taille
+        stocks: (product.baseProduct.stocks || []).map((s: any) => ({
+          colorId: s.colorId,
+          sizeName: s.sizeName,
+          stock: s.stock
+        }))
       };
 
       // ✅ DESIGN APPLICATION

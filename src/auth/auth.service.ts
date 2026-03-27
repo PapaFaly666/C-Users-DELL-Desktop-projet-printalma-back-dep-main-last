@@ -206,11 +206,17 @@ export class AuthService {
 
             // Pour la logique backend (guards anciens), mapper vers les rôles enum
             const slugUpper = user.customRole.slug.toUpperCase();
-            if (slugUpper === 'SUPERADMIN') {
+            if (slugUpper === 'SUPERADMIN' || slugUpper === 'SUPER_ADMIN') {
                 roleString = Role.SUPERADMIN;
             } else if (slugUpper === 'ADMIN') {
                 roleString = Role.ADMIN;
-            } else if (slugUpper === 'VENDOR') {
+            } else if (slugUpper === 'MODERATEUR' || slugUpper === 'MODERATOR') {
+                roleString = Role.MODERATEUR;
+            } else if (slugUpper === 'SUPPORT') {
+                roleString = Role.SUPPORT;
+            } else if (slugUpper === 'COMPTABLE' || slugUpper === 'ACCOUNTANT') {
+                roleString = Role.COMPTABLE;
+            } else if (slugUpper === 'VENDOR' || slugUpper === 'VENDEUR') {
                 roleString = Role.VENDEUR;
             } else {
                 // Pour les autres rôles custom (finance, production, marketing)

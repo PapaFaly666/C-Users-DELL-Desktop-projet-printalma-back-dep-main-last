@@ -13,6 +13,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { AssignPermissionsDto } from './dto/assign-permissions.dto';
 import * as bcrypt from 'bcrypt';
+import { Role } from '@prisma/client';
 import { UserStatus } from '@prisma/client';
 import { MailService } from '../core/mail/mail.service';
 
@@ -310,6 +311,26 @@ export class AdminUsersService {
     const firstName = nameParts[0];
     const lastName = nameParts.slice(1).join(' ') || firstName;
 
+    // Mapping du CustomRole vers l'enum Role pour la compatibilité
+    let mappedRole: Role | null = null;
+    const slugUpper = role.slug.toUpperCase();
+    if (slugUpper === 'SUPERADMIN') {
+      mappedRole = Role.SUPERADMIN;
+    } else if (slugUpper === 'ADMIN') {
+      mappedRole = Role.ADMIN;
+    } else if (slugUpper === 'VENDOR' || slugUpper === 'VENDEUR') {
+      mappedRole = Role.VENDEUR;
+    } else if (slugUpper === 'MODERATEUR') {
+      mappedRole = Role.MODERATEUR;
+    } else if (slugUpper === 'SUPPORT') {
+      mappedRole = Role.SUPPORT;
+    } else if (slugUpper === 'COMPTABLE') {
+      mappedRole = Role.COMPTABLE;
+    } else {
+      // Pour les rôles custom non prévus, on utilise ADMIN par défaut
+      mappedRole = Role.ADMIN;
+    }
+
     // Créer l'utilisateur
     const user = await this.prisma.user.create({
       data: {
@@ -319,6 +340,7 @@ export class AdminUsersService {
         password: hashedPassword,
         phone: dto.phone,
         roleId: dto.roleId,
+        role: mappedRole, // ✅ Aussi définir l'enum pour compatibilité
         userStatus: (dto.status as UserStatus) || UserStatus.ACTIVE,
         created_by: createdBy,
         must_change_password: true, // Forcer le changement du mot de passe

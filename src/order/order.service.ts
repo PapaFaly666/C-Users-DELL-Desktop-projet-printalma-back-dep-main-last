@@ -243,8 +243,8 @@ export class OrderService {
         email: createOrderDto.email
       });
 
-      // 📦 VALIDATION DU STOCK PAR TAILLE
-      await this.validateStockForOrderItems(createOrderDto.orderItems);
+      // 📦 VALIDATION + DÉCRÉMENTATION ATOMIQUE DU STOCK (évite les race conditions)
+      await this.validateAndDecrementStockAtomically(createOrderDto.orderItems);
 
       // ✅ VALIDATION DES STICKERS (quantités min/max, statut, prix)
       const validatedOrderItems = await this.validateStickerOrderItems(createOrderDto.orderItems);
@@ -581,14 +581,7 @@ export class OrderService {
         // Ne pas faire échouer la création de commande pour cette erreur
       }
 
-      // 📦 DÉCRÉMENTATION DU STOCK PAR TAILLE
-      try {
-        await this.decrementStockForOrderItems(createOrderDto.orderItems);
-        this.logger.log(`📦 Stock décrémenté pour commande ${order.id}`);
-      } catch (error) {
-        this.logger.error(`❌ Erreur décrémentation stock pour commande ${order.id}:`, error);
-        // Ne pas faire échouer la création de commande pour cette erreur
-      }
+      // 📦 Stock déjà décrémenté atomiquement avant la création de la commande
 
       // 💳 Payment Integration (PayDunya or PayTech)
       let paymentData = null;
@@ -2767,6 +2760,101 @@ export class OrderService {
   }
 
   // 📦 VALIDATION DU STOCK PAR TAILLE
+  // 📦 VALIDATION + DÉCRÉMENTATION ATOMIQUE (transaction unique pour éviter les race conditions)
+  private async validateAndDecrementStockAtomically(orderItems: any[]): Promise<void> {
+    // Grouper les quantités par productId + colorId + size
+    const stockRequirements = new Map<string, { productId: number; colorId: number; sizeName: string; totalQuantity: number }>();
+
+    for (const item of orderItems) {
+      if (item.stickerId) continue;
+      if (!item.size || !item.colorId || !item.productId) continue;
+
+      const key = `${item.productId}-${item.colorId}-${item.size}`;
+      const existing = stockRequirements.get(key);
+      if (existing) {
+        existing.totalQuantity += item.quantity;
+      } else {
+        stockRequirements.set(key, {
+          productId: item.productId,
+          colorId: item.colorId,
+          sizeName: item.size,
+          totalQuantity: item.quantity
+        });
+      }
+    }
+
+    if (stockRequirements.size === 0) return;
+
+    // Exécuter la validation ET la décrémentation dans une seule transaction atomique
+    await this.prisma.$transaction(async (tx) => {
+      for (const [key, requirement] of stockRequirements) {
+        // Tenter la décrémentation atomique : ne s'exécute que si stock >= quantité demandée
+        const updated = await tx.productStock.updateMany({
+          where: {
+            productId: requirement.productId,
+            colorId: requirement.colorId,
+            sizeName: requirement.sizeName,
+            stock: { gte: requirement.totalQuantity }
+          },
+          data: {
+            stock: { decrement: requirement.totalQuantity }
+          }
+        });
+
+        if (updated.count > 0) {
+          // ✅ Stock décrémenté avec succès
+          await tx.stockMovement.create({
+            data: {
+              productId: requirement.productId,
+              colorId: requirement.colorId,
+              sizeName: requirement.sizeName,
+              type: 'OUT',
+              quantity: requirement.totalQuantity,
+              reason: 'Commande client'
+            }
+          });
+          this.logger.debug(`📦 Stock réservé: ${key} -${requirement.totalQuantity}`);
+          continue;
+        }
+
+        // La mise à jour n'a affecté aucune ligne → vérifier la raison
+        const stockRecord = await tx.productStock.findUnique({
+          where: {
+            productId_colorId_sizeName: {
+              productId: requirement.productId,
+              colorId: requirement.colorId,
+              sizeName: requirement.sizeName
+            }
+          }
+        });
+
+        if (!stockRecord) {
+          // Pas d'enregistrement = produit sans gestion de stock → autorisé
+          this.logger.warn(`📦 Pas de gestion de stock pour: ${key} → commande autorisée`);
+          continue;
+        }
+
+        // Enregistrement existe mais stock insuffisant
+        const product = await tx.product.findUnique({
+          where: { id: requirement.productId },
+          select: { name: true }
+        });
+
+        if (stockRecord.stock <= 0) {
+          throw new BadRequestException(
+            `Rupture de stock pour ${product?.name || `Produit ${requirement.productId}`} (taille: ${requirement.sizeName}). Ce produit n'est plus disponible.`
+          );
+        }
+
+        throw new BadRequestException(
+          `Stock insuffisant pour ${product?.name || `Produit ${requirement.productId}`} (taille: ${requirement.sizeName}). Quantité demandée non disponible.`
+        );
+      }
+    });
+
+    this.logger.log(`✅ Stock validé et décrémenté atomiquement pour ${stockRequirements.size} combinaison(s)`);
+  }
+
   private async validateStockForOrderItems(orderItems: any[]): Promise<void> {
     // Grouper les quantités par productId + colorId + size
     const stockRequirements = new Map<string, { productId: number; colorId: number; sizeName: string; totalQuantity: number }>();
@@ -2811,12 +2899,26 @@ export class OrderService {
         }
       });
 
-      // Si pas de stock trouvé ou stock = 0 → non configuré, on laisse passer
-      if (!productStock || productStock.stock === 0) {
-        this.logger.warn(`📦 Stock non configuré (0 ou absent) pour: productId=${requirement.productId}, colorId=${requirement.colorId}, taille=${requirement.sizeName} → commande autorisée`);
+      // Si aucun enregistrement de stock → produit sans gestion de stock, on laisse passer
+      if (!productStock) {
+        this.logger.warn(`📦 Stock non configuré pour: productId=${requirement.productId}, colorId=${requirement.colorId}, taille=${requirement.sizeName} → commande autorisée`);
         continue;
       }
 
+      // Stock explicitement à 0 ou négatif → rupture de stock
+      if (productStock.stock <= 0) {
+        const product = await this.prisma.product.findUnique({
+          where: { id: requirement.productId },
+          select: { name: true }
+        });
+
+        throw new BadRequestException(
+          `Rupture de stock pour ${product?.name || `Produit ${requirement.productId}`} (taille: ${requirement.sizeName}). ` +
+          `Ce produit n'est plus disponible.`
+        );
+      }
+
+      // Stock insuffisant pour la quantité demandée
       if (productStock.stock < requirement.totalQuantity) {
         const product = await this.prisma.product.findUnique({
           where: { id: requirement.productId },
@@ -2825,7 +2927,7 @@ export class OrderService {
 
         throw new BadRequestException(
           `Stock insuffisant pour ${product?.name || `Produit ${requirement.productId}`} (taille: ${requirement.sizeName}). ` +
-          `Disponible: ${productStock.stock}, Demandé: ${requirement.totalQuantity}`
+          `Quantité demandée non disponible.`
         );
       }
 
