@@ -50,8 +50,14 @@ export class AuthService {
             throw new UnauthorizedException('❌ Email ou mot de passe incorrect');
         }
 
-        // Ne pas bloquer la connexion si le compte est désactivé.
-        // L'utilisateur pourra accéder à la page compte pour réactiver.
+        // 🔒 BLOQUER la connexion pour les vendeurs avec compte inactif (status: false)
+        // Les vendeurs doivent attendre l'activation par l'admin
+        if (user.role === Role.VENDEUR && user.status === false) {
+            throw new UnauthorizedException('⏳ Votre compte est en attente d\'activation par l\'administrateur. Vous recevrez un email lorsque votre compte sera activé.');
+        }
+
+        // Pour les autres rôles (admin, etc.), ne pas bloquer la connexion si le compte est désactivé
+        // afin qu'ils puissent accéder à la page compte pour réactiver.
 
         // Vérifier si le compte est verrouillé (SAUF pour les SUPERADMIN)
         if (user.locked_until && user.locked_until > new Date() && user.role !== Role.SUPERADMIN) {

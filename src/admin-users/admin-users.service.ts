@@ -70,11 +70,28 @@ export class AdminUsersService {
       this.prisma.user.count({ where }),
       this.prisma.user.findMany({
         where,
-        include: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          phone: true,
+          avatar: true,
+          profile_photo_url: true,
+          userStatus: true,
+          role: true, // ✅ Inclure l'enum role pour fallback
+          roleId: true,
+          email_verified: true,
+          last_login_at: true,
+          created_at: true,
+          updated_at: true,
           customRole: {
-            include: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
               permissions: {
-                include: {
+                select: {
                   permission: true,
                 },
               },
@@ -89,12 +106,47 @@ export class AdminUsersService {
       }),
     ]);
 
+    // Helper pour créer un objet rôle à partir de l'enum
+    const createRoleFromEnum = (enumRole: string) => {
+      const roleMap: Record<string, { name: string; slug: string }> = {
+        SUPERADMIN: { name: 'SuperAdmin', slug: 'superadmin' },
+        ADMIN: { name: 'Admin', slug: 'admin' },
+        VENDEUR: { name: 'Vendeur', slug: 'vendor' },
+        MODERATEUR: { name: 'Modérateur', slug: 'moderateur' },
+        SUPPORT: { name: 'Support', slug: 'support' },
+        COMPTABLE: { name: 'Comptable', slug: 'comptable' },
+      };
+      return roleMap[enumRole] || null;
+    };
+
     // Formater les résultats
     const formattedUsers = users.map((user) => {
       // Gérer le cas où firstName ou lastName sont null/undefined
       const firstName = user.firstName || '';
       const lastName = user.lastName || '';
       const fullName = `${firstName} ${lastName}`.trim() || user.email;
+
+      // Utiliser customRole si disponible, sinon fallback sur l'enum role
+      let roleData = null;
+      if (user.customRole) {
+        roleData = {
+          id: user.customRole.id,
+          name: user.customRole.name,
+          slug: user.customRole.slug,
+          permissions: user.customRole.permissions?.map((rp) => rp.permission) || [],
+        };
+      } else if (user.role) {
+        // Fallback : créer un rôle à partir de l'enum
+        const enumRoleData = createRoleFromEnum(user.role);
+        if (enumRoleData) {
+          roleData = {
+            id: 0, // Pas d'ID réel pour l'enum
+            name: enumRoleData.name,
+            slug: enumRoleData.slug,
+            permissions: [],
+          };
+        }
+      }
 
       return {
         id: user.id,
@@ -105,14 +157,7 @@ export class AdminUsersService {
         phone: user.phone,
         avatar: user.avatar || user.profile_photo_url,
         status: user.userStatus,
-        role: user.customRole
-          ? {
-              id: user.customRole.id,
-              name: user.customRole.name,
-              slug: user.customRole.slug,
-              permissions: user.customRole.permissions.map((rp) => rp.permission),
-            }
-          : null,
+        role: roleData,
         roleId: user.roleId,
         emailVerified: user.email_verified,
         lastLogin: user.last_login_at,
