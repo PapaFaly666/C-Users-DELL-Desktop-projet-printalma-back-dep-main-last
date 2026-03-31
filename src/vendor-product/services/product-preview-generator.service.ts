@@ -56,6 +56,28 @@ export class ProductPreviewGeneratorService {
   private readonly logger = new Logger(ProductPreviewGeneratorService.name);
 
   /**
+   * Optimise une URL Cloudinary pour limiter la taille téléchargée.
+   * Réduit la consommation mémoire de Sharp ~4x sans perte de qualité visible.
+   * ex: image 3000x3000px → 1500x1500px = 4x moins de RAM utilisée par Sharp
+   */
+  private optimizeCloudinaryUrl(url: string, maxWidth = 1500): string {
+    if (!url || !url.includes('res.cloudinary.com') || url.includes('.svg')) {
+      return url; // SVG gardé tel quel (Sharp le gère via density)
+    }
+    const uploadIndex = url.indexOf('/upload/');
+    if (uploadIndex === -1) return url;
+
+    const afterUpload = url.substring(uploadIndex + 8);
+    // Ne pas ré-appliquer si des transformations existent déjà
+    if (/^[a-z]_/.test(afterUpload)) return url;
+
+    // c_limit : redimensionne seulement si l'image dépasse maxWidth
+    // q_auto  : qualité automatique Cloudinary
+    // f_png   : forcer PNG pour préserver la transparence
+    return `${url.substring(0, uploadIndex + 8)}w_${maxWidth},c_limit,q_auto,f_png/${afterUpload}`;
+  }
+
+  /**
    * Télécharger une image depuis une URL
    * Les SVG sont téléchargés bruts et seront convertis par Sharp
    */
@@ -451,10 +473,15 @@ export class ProductPreviewGeneratorService {
       // ========================================================================
       // ÉTAPE 1: Télécharger les images
       // ========================================================================
-      this.logger.log(`📥 Téléchargement des images...`);
+      this.logger.log(`📥 Téléchargement des images (optimisées Cloudinary)...`);
+      const optimizedProductUrl = this.optimizeCloudinaryUrl(productImageUrl);
+      const optimizedDesignUrl = this.optimizeCloudinaryUrl(designImageUrl, 1200);
+      if (optimizedProductUrl !== productImageUrl) {
+        this.logger.log(`🔧 Mockup optimisé: ${productImageUrl.split('/').pop()} → max 1500px`);
+      }
       const [productBuffer, rawDesignBuffer] = await Promise.all([
-        this.downloadImage(productImageUrl),
-        this.downloadImage(designImageUrl),
+        this.downloadImage(optimizedProductUrl),
+        this.downloadImage(optimizedDesignUrl),
       ]);
 
       // Note: La bordure blanche pour autocollants sera appliquée APRÈS le redimensionnement

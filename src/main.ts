@@ -33,9 +33,13 @@ process.on('unhandledRejection', (reason: any) => {
 });
 
 async function bootstrap() {
-  // Limiter les threads Sharp pour économiser la mémoire sur Render (free tier 512MB)
+  // Optimisation Sharp pour Render free tier (512MB RAM)
+  // concurrency(1) : 1 seul thread libvips → une seule pipeline Sharp active en RAM à la fois
+  // même si 2 générations JS tournent en parallèle, Sharp les sérialise → mémoire maîtrisée
   sharp.concurrency(1);
-  console.log(`🔧 Sharp concurrency limited to 1 thread (memory optimization)`);
+  // cache(false) : libère la mémoire immédiatement après chaque opération Sharp
+  sharp.cache(false);
+  console.log(`🔧 Sharp optimized: concurrency=1, cache=false (Render memory optimization)`);
 
   await runMigrations();
 

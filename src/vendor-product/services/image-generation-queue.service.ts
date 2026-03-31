@@ -15,8 +15,10 @@ export class ImageGenerationQueueService {
   private readonly MAX_RETRIES = 3; // 3 tentatives max par image
   private readonly RETRY_DELAY = 2000; // 2 secondes entre les retry
 
-  // ⚡ CONCURRENCY LIMIT - 1 seule image à la fois pour éviter OOM sur Render (512MB RAM)
-  private readonly MAX_CONCURRENT_GENERATIONS = 1; // 1 image à la fois
+  // ⚡ CONCURRENCY LIMIT
+  // Images optimisées via Cloudinary (max 1500px) → ~30-50MB par image au lieu de 150-200MB
+  // 2 en parallèle = ~60-100MB Sharp + overhead = safe sur Render 512MB
+  private readonly MAX_CONCURRENT_GENERATIONS = 2;
 
   constructor(
     private readonly prisma: PrismaService,
