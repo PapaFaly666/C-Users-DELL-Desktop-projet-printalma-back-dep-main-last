@@ -102,6 +102,9 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'http://localhost:5174',
+      'http://localhost:3000',
+      'https://printalma.com',
+      'https://www.printalma.com',
       process.env.FRONTEND_URL
     ].filter(Boolean),
     credentials: true, // Important pour les cookies
