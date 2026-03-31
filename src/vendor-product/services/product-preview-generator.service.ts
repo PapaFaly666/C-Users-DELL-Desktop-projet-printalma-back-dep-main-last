@@ -56,6 +56,14 @@ export class ProductPreviewGeneratorService {
   private readonly logger = new Logger(ProductPreviewGeneratorService.name);
 
   /**
+   * Cache de téléchargements : stocke les Promises en cours ou terminées.
+   * Si deux couleurs demandent le même design en parallèle, elles attendent
+   * la MÊME Promise → téléchargement unique, zéro travail dupliqué.
+   * Expiration automatique après 10 minutes.
+   */
+  private readonly downloadCache = new Map<string, Promise<Buffer>>();
+
+  /**
    * Optimise une URL Cloudinary pour limiter la taille téléchargée.
    * Réduit la consommation mémoire de Sharp ~4x sans perte de qualité visible.
    * ex: image 3000x3000px → 1500x1500px = 4x moins de RAM utilisée par Sharp
@@ -75,6 +83,39 @@ export class ProductPreviewGeneratorService {
     // q_auto  : qualité automatique Cloudinary
     // f_png   : forcer PNG pour préserver la transparence
     return `${url.substring(0, uploadIndex + 8)}w_${maxWidth},c_limit,q_auto,f_png/${afterUpload}`;
+  }
+
+  /**
+   * Télécharge une image avec déduplication : si le même URL est demandé
+   * plusieurs fois en parallèle (ex: design partagé entre toutes les couleurs),
+   * un seul téléchargement est effectué et le résultat est partagé.
+   */
+  private downloadImageCached(url: string, maxWidth?: number): Promise<Buffer> {
+    const cacheKey = maxWidth ? this.optimizeCloudinaryUrl(url, maxWidth) : url;
+
+    if (!this.downloadCache.has(cacheKey)) {
+      const optimizedUrl = cacheKey !== url ? cacheKey : this.optimizeCloudinaryUrl(url, maxWidth ?? 1500);
+      this.logger.log(`📥 [CACHE MISS] Téléchargement: ${optimizedUrl.split('/').pop()}`);
+
+      const promise = this.downloadImage(optimizedUrl).then(buffer => {
+        this.logger.log(`✅ [CACHE STORE] ${optimizedUrl.split('/').pop()} (${Math.round(buffer.length / 1024)}KB)`);
+        return buffer;
+      });
+
+      this.downloadCache.set(cacheKey, promise);
+
+      // Expiration automatique après 10 minutes pour libérer la mémoire
+      promise.finally(() => {
+        setTimeout(() => {
+          this.downloadCache.delete(cacheKey);
+          this.logger.log(`🗑️ [CACHE EXPIRE] ${cacheKey.split('/').pop()}`);
+        }, 10 * 60 * 1000);
+      });
+    } else {
+      this.logger.log(`⚡ [CACHE HIT] Réutilisation: ${cacheKey.split('/').pop()} (0 téléchargement)`);
+    }
+
+    return this.downloadCache.get(cacheKey)!;
   }
 
   /**
@@ -473,15 +514,11 @@ export class ProductPreviewGeneratorService {
       // ========================================================================
       // ÉTAPE 1: Télécharger les images
       // ========================================================================
-      this.logger.log(`📥 Téléchargement des images (optimisées Cloudinary)...`);
-      const optimizedProductUrl = this.optimizeCloudinaryUrl(productImageUrl);
-      const optimizedDesignUrl = this.optimizeCloudinaryUrl(designImageUrl, 1200);
-      if (optimizedProductUrl !== productImageUrl) {
-        this.logger.log(`🔧 Mockup optimisé: ${productImageUrl.split('/').pop()} → max 1500px`);
-      }
+      // Mockup produit  : différent par couleur → probablement pas en cache → 1 download par couleur
+      // Design vendeur  : identique pour toutes les couleurs du même produit → 1 seul download partagé
       const [productBuffer, rawDesignBuffer] = await Promise.all([
-        this.downloadImage(optimizedProductUrl),
-        this.downloadImage(optimizedDesignUrl),
+        this.downloadImageCached(productImageUrl, 1500),
+        this.downloadImageCached(designImageUrl, 1200),
       ]);
 
       // Note: La bordure blanche pour autocollants sera appliquée APRÈS le redimensionnement
