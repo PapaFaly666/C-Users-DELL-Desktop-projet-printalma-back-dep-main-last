@@ -4,21 +4,32 @@ import { CloudinaryService } from '../../core/cloudinary/cloudinary.service';
 import { ProductPreviewGeneratorService } from './product-preview-generator.service';
 
 /**
- * 🚀 Service pour la génération d'images parallèle
- * Résout le problème de blocage UI lors de la création de produits
+ * 🚀 Service de génération d'images avec queue globale.
+ *
+ * ARCHITECTURE:
+ * - Queue globale (static) : les générations de TOUS les produits s'enchaînent
+ *   une par une, jamais en parallèle entre produits différents.
+ *   → Même si 10 produits sont publiés simultanément, chaque génération attend
+ *   la fin de la précédente. La mémoire ne s'accumule jamais.
+ *
+ * - Par produit : 1 couleur à la fois (MAX_CONCURRENT=1)
+ *   → Prouvé stable sur Render 512MB avec les images optimisées Cloudinary.
  */
 @Injectable()
 export class ImageGenerationQueueService {
   private readonly logger = new Logger(ImageGenerationQueueService.name);
 
-  // 🔄 RETRY CONFIGURATION - Pour garantir que TOUTES les images soient générées
-  private readonly MAX_RETRIES = 3; // 3 tentatives max par image
-  private readonly RETRY_DELAY = 2000; // 2 secondes entre les retry
+  private readonly MAX_RETRIES = 3;
+  private readonly RETRY_DELAY = 3000; // 3s entre retries
 
-  // ⚡ CONCURRENCY LIMIT
-  // Images optimisées via Cloudinary (max 1500px) → ~30-50MB par image au lieu de 150-200MB
-  // 2 en parallèle = ~60-100MB Sharp + overhead = safe sur Render 512MB
-  private readonly MAX_CONCURRENT_GENERATIONS = 2;
+  // 1 couleur à la fois dans un produit (Safe sur Render 512MB)
+  private readonly MAX_CONCURRENT_GENERATIONS = 1;
+
+  // Queue globale : toutes les générations s'enchaînent séquentiellement
+  // même si plusieurs produits sont publiés en même temps.
+  // static = partagé entre toutes les instances du service (singleton NestJS)
+  private static globalGenerationQueue: Promise<void> = Promise.resolve();
+  private static queueLength = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -314,8 +325,10 @@ export class ImageGenerationQueueService {
   }
 
   /**
-   * 🔄 Génère les images en arrière-plan pour un produit
-   * À utiliser avec la réponse immédiate
+   * 🔄 Ajoute la génération à la queue globale et retourne immédiatement.
+   *
+   * La queue garantit qu'un seul produit génère à la fois, même si plusieurs
+   * produits sont soumis en parallèle. Les jobs s'enchaînent automatiquement.
    */
   async generateImagesInBackground(
     productId: number,
@@ -324,28 +337,35 @@ export class ImageGenerationQueueService {
     positionData: any,
     isSticker: boolean = false,
   ): Promise<void> {
-    try {
-      this.logger.log(`🔄 [BACKGROUND] Début génération asynchrone pour produit ${productId}`);
+    ImageGenerationQueueService.queueLength++;
+    const position = ImageGenerationQueueService.queueLength;
+    this.logger.log(`📥 [QUEUE] Produit ${productId} ajouté en position #${position}`);
 
-      // Générer les images en arrière-plan sans changer le statut du produit
-      const result = await this.generateImagesForColors(
-        productId,
-        colors,
-        design,
-        positionData,
-        isSticker,
-      );
+    // Enchaîner sur la queue globale existante — ne démarre que quand la précédente finit
+    ImageGenerationQueueService.globalGenerationQueue =
+      ImageGenerationQueueService.globalGenerationQueue
+        .then(async () => {
+          this.logger.log(`▶️ [QUEUE] Démarrage génération produit ${productId} (position était #${position})`);
+          try {
+            const result = await this.generateImagesForColors(
+              productId,
+              colors,
+              design,
+              positionData,
+              isSticker,
+            );
 
-      if (result.colorsProcessed === result.totalColors) {
-        this.logger.log(`✅ [BACKGROUND] Toutes les images générées pour produit ${productId} (${result.totalColors}/${result.totalColors})`);
-      } else if (result.colorsProcessed > 0) {
-        this.logger.warn(`⚠️ [BACKGROUND] Produit ${productId}: ${result.colorsProcessed}/${result.totalColors} couleurs générées`);
-      } else {
-        this.logger.error(`❌ [BACKGROUND] Aucune image générée pour produit ${productId}`);
-      }
-
-    } catch (error) {
-      this.logger.error(`❌ [BACKGROUND] Erreur génération pour produit ${productId}:`, error);
-    }
+            if (result.colorsProcessed === result.totalColors) {
+              this.logger.log(`✅ [QUEUE] Produit ${productId}: ${result.totalColors}/${result.totalColors} images générées`);
+            } else {
+              this.logger.warn(`⚠️ [QUEUE] Produit ${productId}: ${result.colorsProcessed}/${result.totalColors} images générées`);
+            }
+          } catch (error) {
+            // Ne pas propager l'erreur pour ne pas casser la queue
+            this.logger.error(`❌ [QUEUE] Erreur produit ${productId}: ${error.message}`);
+          } finally {
+            ImageGenerationQueueService.queueLength = Math.max(0, ImageGenerationQueueService.queueLength - 1);
+          }
+        });
   }
 }
