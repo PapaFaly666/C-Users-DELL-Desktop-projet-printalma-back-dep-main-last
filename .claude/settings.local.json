@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"Bull\\\\|bull\\\\|Queue\\\\|queue\" /c/Users/DELL/Desktop/projet/printalma-back-dep-main-last/src/vendor-product/*.ts)"
+    ]
+  }
+}

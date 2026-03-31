@@ -99,14 +99,36 @@ async function bootstrap() {
   const documentFactory = () => SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, documentFactory);
 
+  // Configuration CORS plus robuste pour production
+  const allowedOrigins = [
+    'http://localhost:5174',
+    'http://localhost:3000',
+    'https://printalma.com',
+    'https://www.printalma.com',
+    'https://printalma-website-dep.onrender.com',
+    process.env.FRONTEND_URL
+  ].filter(Boolean);
+
+  console.log('🌐 CORS Origins autorisées:', allowedOrigins);
+
   app.enableCors({
-    origin: [
-      'http://localhost:5174',
-      'http://localhost:3000',
-      'https://printalma.com',
-      'https://www.printalma.com',
-      process.env.FRONTEND_URL
-    ].filter(Boolean),
+    origin: function(origin, callback) {
+      // Permettre les requêtes sans origin (mobile, curl, postman)
+      if (!origin) return callback(null, true);
+
+      // En développement, être plus permissif
+      if (process.env.NODE_ENV === 'development' || origin.includes('localhost')) {
+        return callback(null, true);
+      }
+
+      // Vérifier si l'origine est dans la liste
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️ Origin bloquée par CORS: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true, // Important pour les cookies
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'x-user-id', 'x-user-role', 'x-user-email'],
