@@ -106,6 +106,8 @@ async function bootstrap() {
     'https://printalma.com',
     'https://www.printalma.com',
     'https://printalma-website-dep.onrender.com',
+    'https://c-users-dell-desktop-projet-printalma.onrender.com',
+    'https://printalma-back-dep.onrender.com',
     process.env.FRONTEND_URL
   ].filter(Boolean);
 
