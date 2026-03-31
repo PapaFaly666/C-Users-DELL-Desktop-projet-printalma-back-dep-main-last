@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import * as bodyParser from 'body-parser';
 import { v2 as cloudinary } from 'cloudinary';
 import { PrismaClient } from '@prisma/client';
+import sharp from 'sharp';
 
 async function runMigrations() {
   const prisma = new PrismaClient();
@@ -32,6 +33,10 @@ process.on('unhandledRejection', (reason: any) => {
 });
 
 async function bootstrap() {
+  // Limiter les threads Sharp pour économiser la mémoire sur Render (free tier 512MB)
+  sharp.concurrency(1);
+  console.log(`🔧 Sharp concurrency limited to 1 thread (memory optimization)`);
+
   await runMigrations();
 
   // Initialize Cloudinary configuration globally
