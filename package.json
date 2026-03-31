@@ -69,6 +69,10 @@
     "streamifier": "^0.1.1",
     "swagger-ui-express": "^5.0.1"
   },
+  "optionalDependencies": {
+    "@img/sharp-linux-x64": "^0.34.5",
+    "@img/sharp-linux-arm64": "^0.34.5"
+  },
   "devDependencies": {
     "@nestjs/testing": "^10.0.0",
     "@types/bcrypt": "^5.0.2",
