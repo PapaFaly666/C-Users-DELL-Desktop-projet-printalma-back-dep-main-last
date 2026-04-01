@@ -1,27 +1,11 @@
 import { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
-import { BadRequestException } from '@nestjs/common';
 
 // Configuration pour les uploads d'images de design
+// Plus de validation de type ou de taille - accepter tous les fichiers
 export const multerConfig: MulterOptions = {
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-  },
+  // Pas de limite de taille, pas de filtre de type
   fileFilter: (req, file, cb) => {
-    // Types MIME autorisés pour les designs
-    const allowedMimeTypes = [
-      'image/jpeg',
-      'image/jpg', 
-      'image/png',
-      'image/gif',
-      'image/webp',
-      'image/svg+xml' // Type MIME correct pour SVG
-    ];
-    
-    if (allowedMimeTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new BadRequestException(`Format de fichier non autorisé. Types acceptés: ${allowedMimeTypes.join(', ')}`), false);
-    }
+    cb(null, true); // Accepter tous les fichiers
   },
 };
 
@@ -32,10 +16,10 @@ export const profilePhotoConfig: MulterOptions = {
   },
   fileFilter: (req, file, cb) => {
     console.log(`📸 Validation photo de profil: ${file.originalname} (${file.mimetype})`);
-    
+
     // Types MIME autorisés pour les photos de profil
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    
+
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {

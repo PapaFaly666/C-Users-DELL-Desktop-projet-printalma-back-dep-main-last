@@ -40,24 +40,28 @@ export class CreateDesignDto {
   description?: string;
 
   @ApiProperty({
-    description: 'Prix en FCFA (0 pour gratuit)',
+    description: 'Prix en FCFA (0 pour gratuit, vide = 0 par défaut)',
     example: 2500,
     minimum: 0,
     maximum: 1000000,
-    type: 'number'
+    type: 'number',
+    required: false
   })
-  @IsNotEmpty({ message: 'Le prix est requis' })
+  @IsOptional()
   @IsNumber({}, { message: 'Le prix doit être un nombre' })
   @Min(0, { message: 'Le prix ne peut pas être négatif' })
   @Max(1000000, { message: 'Le prix maximum est de 1,000,000 FCFA' })
   @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') {
+      return 0;
+    }
     if (typeof value === 'string') {
       const numeric = value.replace(/[^0-9.-]/g, '');
-      return Number(numeric);
+      return Number(numeric) || 0;
     }
     return value;
   })
-  price: number;
+  price?: number;
 
   @ApiProperty({
     description: 'ID de la catégorie du design (créée par l\'admin)',

@@ -96,22 +96,21 @@ export class ImageGenerationQueueService {
               this.logger.log(`📎 [PARALLEL] URL image de base pour ${color.name}: ${colorInfo.productImage.url}`);
               this.logger.log(`📐 [PARALLEL] Délimitation pour ${color.name}: ${JSON.stringify(colorInfo.delimitation)}`);
 
-              // 2. Génération de l'image (SANS timeout - prend le temps qu'il faut)
-              this.logger.log(`🖼️ [PARALLEL] Génération preview pour ${color.name}...`);
-              const imageBuffer = await this.previewGenerator.generatePreviewFromJson(
+              // 2. Génération de l'image en streaming (SANS buffer intermédiaire)
+              this.logger.log(`🖼️ [PARALLEL] Génération preview stream pour ${color.name}...`);
+              const pipeline = await this.previewGenerator.generatePreviewStreamFromJson(
                 colorInfo.productImage.url,
                 design.imageUrl,
                 colorInfo.delimitation,
                 positionData,
-                false,
                 isSticker
               );
 
-              this.logger.log(`✅ [PARALLEL] Image générée pour ${color.name} (${imageBuffer.length} bytes)`);
+              this.logger.log(`✅ [PARALLEL] Pipeline prêt pour ${color.name} — upload stream...`);
 
-              // 3. Upload Cloudinary (SANS timeout)
-              this.logger.log(`☁️ [PARALLEL] Upload vers Cloudinary pour ${color.name}...`);
-              const uploadResult = await this.cloudinaryService.uploadBuffer(imageBuffer, {
+              // 3. Upload Cloudinary via stream (pas de buffer en RAM)
+              this.logger.log(`☁️ [PARALLEL] Upload stream vers Cloudinary pour ${color.name}...`);
+              const uploadResult = await this.cloudinaryService.uploadSharpPipeline(pipeline, {
                 folder: 'vendor-product-finals',
                 public_id: `final_${productId}_color_${color.id}_${Date.now()}`,
                 resource_type: 'image',

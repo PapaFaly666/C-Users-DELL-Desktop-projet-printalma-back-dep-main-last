@@ -396,28 +396,11 @@ export class DesignService {
   }
 
   private validateFile(file: Express.Multer.File): void {
-    // Cohérence avec multerConfig.ts
-    const allowedMimeTypes = [
-      'image/jpeg',
-      'image/jpg', 
-      'image/png',
-      'image/gif',
-      'image/webp',
-      'image/svg+xml'
-    ];
-    const maxFileSize = 10 * 1024 * 1024; // 10MB
-
+    // Validation minimale - seulement vérifier que le fichier existe
     if (!file) {
       throw new BadRequestException('Fichier requis');
     }
-
-    if (!allowedMimeTypes.includes(file.mimetype)) {
-      throw new BadRequestException('Format de fichier non supporté. Formats acceptés: JPG, PNG, GIF, WEBP, SVG');
-    }
-
-    if (file.size > maxFileSize) {
-      throw new BadRequestException('Fichier trop volumineux (max 10MB)');
-    }
+    // Plus de validation de type MIME ou de taille - accepter tous les fichiers
   }
 
 

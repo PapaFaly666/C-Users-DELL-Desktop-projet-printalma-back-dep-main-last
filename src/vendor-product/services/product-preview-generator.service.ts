@@ -466,321 +466,210 @@ export class ProductPreviewGeneratorService {
    * @param config - Configuration de génération de preview
    * @returns Buffer de l'image PNG générée
    */
-  async generateProductPreview(config: ProductPreviewConfig): Promise<Buffer> {
+  // ============================================================
+  // COEUR DU TRAITEMENT : étapes 1-5 partagées entre Buffer et Stream
+  // ============================================================
+
+  /**
+   * Prépare tous les éléments nécessaires à la composition finale.
+   * Étapes 1-5 : download → positioning → resize → sticker border → rotation
+   *
+   * MÉMOIRE :
+   * - Mockup téléchargé SANS cache (différent par couleur, jamais réutilisé)
+   * - Design téléchargé AVEC cache (identique pour toutes les couleurs)
+   * - Buffers intermédiaires nullifiés dès qu'ils ne sont plus nécessaires
+   */
+  private async _prepareComposite(config: ProductPreviewConfig): Promise<{
+    productBuffer: Buffer;
+    processedDesign: Buffer;
+    finalLeft: number;
+    finalTop: number;
+    delimInPixels: { x: number; y: number; width: number; height: number };
+  }> {
     const { productImageUrl, designImageUrl, delimitation, position } = config;
 
-    try {
-      this.logger.log(`🎨 === DÉBUT GÉNÉRATION IMAGE FINALE (ALGORITHME UNIFIÉ v2.0) ===`);
+    const designScale = position.designScale ?? position.scale ?? 0.8;
+    const delimitationWidth = position.delimitationWidth ?? delimitation.width;
+    const delimitationHeight = position.delimitationHeight ?? delimitation.height;
 
-      // ========================================================================
-      // VALIDATION & NORMALISATION DES DONNÉES D'ENTRÉE
-      // ========================================================================
+    const transform: DesignTransform = {
+      x: position.x || 0,
+      y: position.y || 0,
+      designScale,
+      rotation: position.rotation || 0,
+      positionUnit: 'PIXEL',
+      delimitationWidth,
+      delimitationHeight,
+    };
 
-      // Support des deux formats: designScale (nouveau) et scale (ancien)
-      const designScale = position.designScale ?? position.scale ?? 0.8;
+    validateDesignTransform(transform);
 
-      // Utiliser delimitationWidth/Height du position ou fallback sur la délimitation
-      const delimitationWidth = position.delimitationWidth ?? delimitation.width;
-      const delimitationHeight = position.delimitationHeight ?? delimitation.height;
+    // ── Étape 1 : Téléchargement ──────────────────────────────────────────────
+    // Mockup : PAS de cache (différent par couleur → libéré après chaque génération)
+    // Design : cache 10min (identique pour toutes les couleurs du même produit)
+    const [productBuffer, designBuffer] = await Promise.all([
+      this.downloadImage(this.optimizeCloudinaryUrl(productImageUrl, 1200)),
+      this.downloadImageCached(designImageUrl, 1200),
+    ]);
 
-      // Créer l'objet DesignTransform pour l'utilitaire
-      const transform: DesignTransform = {
-        x: position.x || 0,
-        y: position.y || 0,
-        designScale,
-        rotation: position.rotation || 0,
-        positionUnit: 'PIXEL',
-        delimitationWidth,
-        delimitationHeight,
-      };
+    const productMetadata = await sharp(productBuffer).metadata();
+    const imageWidth = productMetadata.width || 1200;
+    const imageHeight = productMetadata.height || 1200;
 
-      // Valider les données
-      try {
-        validateDesignTransform(transform);
-      } catch (validationError) {
-        this.logger.error(`❌ Validation échouée: ${validationError.message}`);
-        throw validationError;
-      }
+    this.logger.log(`✅ Mockup: ${imageWidth}x${imageHeight}px | Design en cache`);
 
-      this.logger.log(`📊 Entrées validées:`, {
-        x: transform.x,
-        y: transform.y,
-        designScale: transform.designScale,
-        rotation: transform.rotation,
-        delimitationWidth: transform.delimitationWidth,
-        delimitationHeight: transform.delimitationHeight,
-      });
+    // ── Étape 2 : Positionnement ──────────────────────────────────────────────
+    const positioning = calculateCompletePositioning(
+      delimitation as BBoxDelimitation,
+      transform,
+      imageWidth,
+      imageHeight
+    );
+    const { boundingBox, delimInPixels, centerContainer } = positioning;
 
-      // ========================================================================
-      // ÉTAPE 1: Télécharger les images
-      // ========================================================================
-      // Mockup produit  : différent par couleur → probablement pas en cache → 1 download par couleur
-      // Design vendeur  : identique pour toutes les couleurs du même produit → 1 seul download partagé
-      const [productBuffer, rawDesignBuffer] = await Promise.all([
-        this.downloadImageCached(productImageUrl, 1500),
-        this.downloadImageCached(designImageUrl, 1200),
-      ]);
+    // ── Étape 3 : Redimensionnement du design ─────────────────────────────────
+    const BORDER_RATIO = 0.08;
+    let targetWidth = boundingBox.width;
+    let targetHeight = boundingBox.height;
 
-      // Note: La bordure blanche pour autocollants sera appliquée APRÈS le redimensionnement
-      // pour garantir une épaisseur visible proportionnelle à la taille finale
-      const designBuffer = rawDesignBuffer;
+    if (config.isSticker) {
+      const reductionFactor = 1 - (BORDER_RATIO * 2);
+      targetWidth = Math.round(boundingBox.width * reductionFactor);
+      targetHeight = Math.round(boundingBox.height * reductionFactor);
+    }
 
-      const productMetadata = await sharp(productBuffer).metadata();
-      const designMetadata = await sharp(designBuffer).metadata();
-      const imageWidth = productMetadata.width || 1200;
-      const imageHeight = productMetadata.height || 1200;
-
-      this.logger.log(`✅ Mockup: ${imageWidth}x${imageHeight}px`);
-      this.logger.log(`✅ Design: ${designMetadata.width}x${designMetadata.height}px`);
-      this.logger.log(`🔍 DEBUG: config.isSticker = ${config.isSticker}`);
-
-      // ========================================================================
-      // ÉTAPE 2: Calculer TOUTES les informations de positionnement
-      // avec l'utilitaire centralisé (algorithme exact de la doc)
-      // ========================================================================
-      this.logger.log(`📐 Calcul bounding box avec algorithme unifié...`);
-
-      const positioning = calculateCompletePositioning(
-        delimitation as BBoxDelimitation,
-        transform,
-        imageWidth,
-        imageHeight
-      );
-
-      const {
-        boundingBox,
-        constraints,
-        constrainedPosition,
-        delimInPixels,
-        containerDimensions,
-        centerDelimitation,
-        centerContainer,
-      } = positioning;
-
-      this.logger.log(`📦 Conteneur: ${containerDimensions.width}x${containerDimensions.height}px`);
-      this.logger.log(`🔒 Contraintes: minX=${constraints.minX.toFixed(1)}, maxX=${constraints.maxX.toFixed(1)}, ` +
-        `minY=${constraints.minY.toFixed(1)}, maxY=${constraints.maxY.toFixed(1)}`);
-      this.logger.log(`📍 Position: demandée={x:${transform.x}, y:${transform.y}}, ` +
-        `contrainte={x:${constrainedPosition.x.toFixed(1)}, y:${constrainedPosition.y.toFixed(1)}}`);
-      this.logger.log(`🎯 Centre délimitation: (${centerDelimitation.x}, ${centerDelimitation.y})`);
-      this.logger.log(`🎯 Centre conteneur: (${centerContainer.x}, ${centerContainer.y})`);
-      this.logger.log(`📐 Bounding Box: left=${boundingBox.left}, top=${boundingBox.top}, ` +
-        `width=${boundingBox.width}, height=${boundingBox.height}`);
-
-      // ========================================================================
-      // ÉTAPE 3: Redimensionner le Design avec fit: 'inside'
-      // ✅ CRITIQUE: fit: 'inside' équivaut à CSS object-fit: contain
-      // Pour les autocollants, on réduit la taille pour laisser de la place à la bordure
-      // ========================================================================
-      this.logger.log(`🖼️ Redimensionnement design avec fit: 'inside'...`);
-
-      // Pour les autocollants, calculer la bordure et réduire la zone de design
-      const BORDER_RATIO = 0.08; // 8% de bordure blanche
-      let targetWidth = boundingBox.width;
-      let targetHeight = boundingBox.height;
-      let borderWidth = 0;
-
-      if (config.isSticker) {
-        // Réduire la zone de design pour laisser de la place à la bordure (2x car bordure des 2 côtés)
-        const reductionFactor = 1 - (BORDER_RATIO * 2);
-        targetWidth = Math.round(boundingBox.width * reductionFactor);
-        targetHeight = Math.round(boundingBox.height * reductionFactor);
-
-        this.logger.log(`🎨 AUTOCOLLANT: Réduction zone design pour bordure (facteur: ${reductionFactor.toFixed(2)})`);
-        this.logger.log(`📏 Zone ajustée: ${boundingBox.width}x${boundingBox.height} → ${targetWidth}x${targetHeight}px`);
-      }
-
-      let resizedDesign = await sharp(designBuffer)
-        .resize({
-          width: targetWidth,
-          height: targetHeight,
-          fit: 'inside',              // ✅ ESSENTIEL: préserve le ratio (comme object-fit: contain)
-          withoutEnlargement: false,
-          position: 'center',
-          background: { r: 0, g: 0, b: 0, alpha: 0 }
-        })
-        .toBuffer();
-
-      // Obtenir les dimensions réelles après resize
-      let actualMetadata = await sharp(resizedDesign).metadata();
-      let actualDesignWidth = actualMetadata.width || 0;
-      let actualDesignHeight = actualMetadata.height || 0;
-
-      this.logger.log(`🖼️ Design après resize: ${actualDesignWidth}x${actualDesignHeight}px ` +
-        `(ratio préservé: ${(actualDesignWidth / actualDesignHeight).toFixed(3)})`);
-
-      // 🎨 ÉTAPE 3.5: Appliquer la bordure blanche APRÈS redimensionnement pour autocollants
-      if (config.isSticker) {
-        this.logger.log(`🎨 ✅ AUTOCOLLANT DÉTECTÉ: Application bordure blanche`);
-
-        // Calculer la taille de bordure proportionnelle à la zone de design
-        const avgDimension = (actualDesignWidth + actualDesignHeight) / 2;
-        borderWidth = Math.max(Math.round(avgDimension * BORDER_RATIO), 12); // Minimum 12px
-
-        this.logger.log(`📏 Bordure calculée: ${borderWidth}px (${BORDER_RATIO*100}% de ${Math.round(avgDimension)}px)`);
-
-        const beforeSize = resizedDesign.length;
-        resizedDesign = await this.addWhiteStrokeToDesign(resizedDesign, borderWidth);
-        const afterSize = resizedDesign.length;
-
-        // Recalculer les dimensions après ajout de la bordure
-        actualMetadata = await sharp(resizedDesign).metadata();
-        actualDesignWidth = actualMetadata.width || 0;
-        actualDesignHeight = actualMetadata.height || 0;
-
-        this.logger.log(`✅ Bordure appliquée - Nouvelles dimensions: ${actualDesignWidth}x${actualDesignHeight}px`);
-        this.logger.log(`📦 Taille: ${Math.round(beforeSize/1024)}KB → ${Math.round(afterSize/1024)}KB`);
-        this.logger.log(`🔍 Vérification: Design+bordure rentre dans boundingBox? ` +
-          `${actualDesignWidth}x${actualDesignHeight} vs ${boundingBox.width}x${boundingBox.height}`);
-      } else {
-        this.logger.log(`🔍 DEBUG: Pas d'autocollant (isSticker=false), pas de bordure`);
-      }
-
-      // ========================================================================
-      // ÉTAPE 4: Centrer le Design dans le Conteneur
-      // Le design peut être plus petit que le conteneur (à cause de fit: 'inside')
-      // Pour les autocollants, le design avec bordure peut être plus grand que le boundingBox
-      // ========================================================================
-
-      // Pour les autocollants, le conteneur doit être au moins aussi grand que le design avec bordure
-      // MAIS ne doit pas dépasser les dimensions du mockup!
-      const maxContainerWidth = imageWidth;
-      const maxContainerHeight = imageHeight;
-
-      const containerWidth = config.isSticker
-        ? Math.min(Math.max(boundingBox.width, actualDesignWidth), maxContainerWidth)
-        : boundingBox.width;
-      const containerHeight = config.isSticker
-        ? Math.min(Math.max(boundingBox.height, actualDesignHeight), maxContainerHeight)
-        : boundingBox.height;
-
-      // Si le design est plus grand que le conteneur (après limitation), il faut le redimensionner
-      if (actualDesignWidth > containerWidth || actualDesignHeight > containerHeight) {
-        this.logger.warn(`⚠️ Design+bordure (${actualDesignWidth}x${actualDesignHeight}) plus grand que le conteneur max (${containerWidth}x${containerHeight}), redimensionnement nécessaire`);
-        const scaleFactor = Math.min(containerWidth / actualDesignWidth, containerHeight / actualDesignHeight);
-        const newWidth = Math.round(actualDesignWidth * scaleFactor);
-        const newHeight = Math.round(actualDesignHeight * scaleFactor);
-
-        resizedDesign = await sharp(resizedDesign)
-          .resize(newWidth, newHeight, { fit: 'inside', withoutEnlargement: false })
-          .toBuffer();
-
-        const resizedMetadata = await sharp(resizedDesign).metadata();
-        actualDesignWidth = resizedMetadata.width || newWidth;
-        actualDesignHeight = resizedMetadata.height || newHeight;
-
-        this.logger.log(`📐 Design redimensionné pour tenir dans le conteneur: ${actualDesignWidth}x${actualDesignHeight}px`);
-      }
-
-      const designOffsetX = Math.max(0, Math.round((containerWidth - actualDesignWidth) / 2));
-      const designOffsetY = Math.max(0, Math.round((containerHeight - actualDesignHeight) / 2));
-
-      this.logger.log(`📐 Conteneur: ${containerWidth}x${containerHeight}px (boundingBox: ${boundingBox.width}x${boundingBox.height}px)`);
-      this.logger.log(`📐 Centrage design dans conteneur: offsetX=${designOffsetX}, offsetY=${designOffsetY}`);
-
-      // Créer un canvas transparent aux dimensions du conteneur
-      const designInContainer = await sharp({
-        create: {
-          width: containerWidth,
-          height: containerHeight,
-          channels: 4,
-          background: { r: 0, g: 0, b: 0, alpha: 0 }
-        }
-      })
-      .composite([{
-        input: resizedDesign,
-        left: designOffsetX,
-        top: designOffsetY
-      }])
-      .png()
+    let resizedDesign: Buffer | null = await sharp(designBuffer)
+      .resize({ width: targetWidth, height: targetHeight, fit: 'inside',
+                withoutEnlargement: false, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .png({ compressionLevel: 1 }) // compressionLevel bas pour les buffers intermédiaires
       .toBuffer();
 
-      // ========================================================================
-      // ÉTAPE 5: Appliquer la Rotation si nécessaire
-      // ========================================================================
-      let processedDesign = designInContainer;
+    let actualMetadata = await sharp(resizedDesign).metadata();
+    let actualDesignWidth = actualMetadata.width || 0;
+    let actualDesignHeight = actualMetadata.height || 0;
 
-      // Pour les autocollants, le conteneur peut être plus grand que le boundingBox
-      // Il faut ajuster la position pour centrer le conteneur sur le centre prévu
-      const containerMetadata = await sharp(processedDesign).metadata();
-      const actualContainerWidth = containerMetadata.width || containerWidth;
-      const actualContainerHeight = containerMetadata.height || containerHeight;
+    // ── Étape 3.5 : Bordure blanche (stickers) ────────────────────────────────
+    if (config.isSticker) {
+      const avgDimension = (actualDesignWidth + actualDesignHeight) / 2;
+      const borderWidth = Math.max(Math.round(avgDimension * BORDER_RATIO), 12);
+      resizedDesign = await this.addWhiteStrokeToDesign(resizedDesign, borderWidth);
+      actualMetadata = await sharp(resizedDesign).metadata();
+      actualDesignWidth = actualMetadata.width || 0;
+      actualDesignHeight = actualMetadata.height || 0;
+    }
 
-      // Ajuster la position initiale en fonction de la différence entre conteneur et boundingBox
-      let finalLeft = centerContainer.x - (actualContainerWidth / 2);
-      let finalTop = centerContainer.y - (actualContainerHeight / 2);
+    // ── Étape 4 : Centrage dans le conteneur ──────────────────────────────────
+    const containerWidth = config.isSticker
+      ? Math.min(Math.max(boundingBox.width, actualDesignWidth), imageWidth)
+      : boundingBox.width;
+    const containerHeight = config.isSticker
+      ? Math.min(Math.max(boundingBox.height, actualDesignHeight), imageHeight)
+      : boundingBox.height;
 
-      this.logger.log(`📍 Position initiale (avant rotation): (${Math.round(finalLeft)}, ${Math.round(finalTop)})`);
+    if (actualDesignWidth > containerWidth || actualDesignHeight > containerHeight) {
+      const scaleFactor = Math.min(containerWidth / actualDesignWidth, containerHeight / actualDesignHeight);
+      resizedDesign = await sharp(resizedDesign)
+        .resize(Math.round(actualDesignWidth * scaleFactor), Math.round(actualDesignHeight * scaleFactor),
+                { fit: 'inside', withoutEnlargement: false })
+        .png({ compressionLevel: 1 })
+        .toBuffer();
+      actualMetadata = await sharp(resizedDesign).metadata();
+      actualDesignWidth = actualMetadata.width || 0;
+      actualDesignHeight = actualMetadata.height || 0;
+    }
 
-      if (transform.rotation !== 0) {
-        this.logger.log(`🔄 Application rotation: ${transform.rotation}°`);
+    const designOffsetX = Math.max(0, Math.round((containerWidth - actualDesignWidth) / 2));
+    const designOffsetY = Math.max(0, Math.round((containerHeight - actualDesignHeight) / 2));
 
-        const rotatedDesign = await sharp(processedDesign)
-          .rotate(transform.rotation, {
-            background: { r: 0, g: 0, b: 0, alpha: 0 }
-          })
-          .toBuffer();
+    let designInContainer: Buffer | null = await sharp({
+      create: { width: containerWidth, height: containerHeight, channels: 4,
+                background: { r: 0, g: 0, b: 0, alpha: 0 } }
+    })
+    .composite([{ input: resizedDesign, left: designOffsetX, top: designOffsetY }])
+    .png({ compressionLevel: 1 })
+    .toBuffer();
 
-        const rotatedMetadata = await sharp(rotatedDesign).metadata();
+    // Libérer resizedDesign — plus nécessaire
+    resizedDesign = null;
 
-        // Recentrer après rotation (le centre doit rester au même endroit)
-        finalLeft = centerContainer.x - ((rotatedMetadata.width || 0) / 2);
-        finalTop = centerContainer.y - ((rotatedMetadata.height || 0) / 2);
+    // ── Étape 5 : Rotation ───────────────────────────────────────────────────
+    const containerMeta = await sharp(designInContainer).metadata();
+    let finalLeft = centerContainer.x - ((containerMeta.width || containerWidth) / 2);
+    let finalTop  = centerContainer.y - ((containerMeta.height || containerHeight) / 2);
 
-        this.logger.log(`🔄 Après rotation: ${rotatedMetadata.width}x${rotatedMetadata.height}px`);
-        this.logger.log(`📍 Position ajustée après rotation: (${Math.round(finalLeft)}, ${Math.round(finalTop)})`);
+    let processedDesign: Buffer;
 
-        processedDesign = rotatedDesign;
-      }
+    if (transform.rotation !== 0) {
+      const rotated = await sharp(designInContainer)
+        .rotate(transform.rotation, { background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png({ compressionLevel: 1 })
+        .toBuffer();
+      const rotatedMeta = await sharp(rotated).metadata();
+      finalLeft = centerContainer.x - ((rotatedMeta.width || 0) / 2);
+      finalTop  = centerContainer.y - ((rotatedMeta.height || 0) / 2);
+      processedDesign = rotated;
+      designInContainer = null; // Libérer le buffer non-rotaté
+    } else {
+      processedDesign = designInContainer;
+      designInContainer = null;
+    }
 
-      // ========================================================================
-      // ÉTAPE 6: Composer l'Image Finale
-      // ========================================================================
-      this.logger.log(`🎨 Composition finale...`);
+    this.logger.log(`✅ Composite prêt: design ${actualDesignWidth}x${actualDesignHeight}px @ (${Math.round(finalLeft)}, ${Math.round(finalTop)})`);
+
+    return { productBuffer, processedDesign, finalLeft, finalTop, delimInPixels };
+  }
+
+  // ============================================================
+  // CHEMIN BUFFER — utilisé pour le debug (showDelimitation)
+  // ============================================================
+
+  async generateProductPreview(config: ProductPreviewConfig): Promise<Buffer> {
+    try {
+      this.logger.log(`🎨 === GÉNÉRATION IMAGE (buffer) ===`);
+      const { productBuffer, processedDesign, finalLeft, finalTop, delimInPixels } =
+        await this._prepareComposite(config);
 
       let finalImage = await sharp(productBuffer)
-        .composite([{
-          input: processedDesign,
-          left: Math.round(finalLeft),
-          top: Math.round(finalTop),
-          blend: 'over',
-        }])
-        .png({
-          quality: 85,           // Réduction de 95 → 85 pour fichiers plus légers
-          compressionLevel: 6,   // Compression modérée (0-9, défaut: 6)
-          effort: 5              // Effort de compression (1-10, défaut: 7, réduit à 5 pour vitesse)
-        })
+        .composite([{ input: processedDesign, left: Math.round(finalLeft), top: Math.round(finalTop), blend: 'over' }])
+        .png({ quality: 85, compressionLevel: 6, effort: 5 })
         .toBuffer();
 
-      // ⚠️ DEBUG: Tracer la délimitation si demandé
       if (config.showDelimitation) {
-        this.logger.log(`🔴 DEBUG: Activation tracé délimitation`);
         finalImage = await this.drawDelimitationRect(finalImage, delimInPixels);
       }
 
-      const finalDims = await this.getDimensions(finalImage);
-      this.logger.log(`✅ Image finale générée: ${finalDims.width}x${finalDims.height}px (${finalImage.length} bytes)`);
-      this.logger.log(`🎨 === FIN GÉNÉRATION IMAGE FINALE ===\n`);
-
+      const dims = await this.getDimensions(finalImage);
+      this.logger.log(`✅ Image finale: ${dims.width}x${dims.height}px (${Math.round(finalImage.length / 1024)}KB)`);
       return finalImage;
-
     } catch (error) {
       this.logger.error(`❌ Erreur génération preview: ${error.message}`, error.stack);
       throw new Error(`Échec de la génération de la preview: ${error.message}`);
     }
   }
 
-  /**
-   * Générer une preview depuis les données de position stockées en JSON
-   *
-   * @param productImageUrl - URL de l'image du produit
-   * @param designImageUrl - URL de l'image du design
-   * @param delimitation - Délimitation (zone imprimable)
-   * @param positionJson - JSON de position (format ProductDesignPosition)
-   * @param showDelimitation - ⚠️ DEBUG: Afficher un contour rouge autour de la délimitation
-   * @param isSticker - 🎨 Si true, applique une bordure blanche au design (style autocollant)
-   * @returns Buffer de l'image PNG générée
-   */
+  // ============================================================
+  // CHEMIN STREAM — utilisé par la queue de production
+  // Retourne un pipeline Sharp qui sera pipé directement vers Cloudinary.
+  // Le buffer final (~9MB) n'est JAMAIS matérialisé en mémoire.
+  // Sortie JPEG : 3× plus rapide que PNG, 5× plus petit.
+  // ============================================================
+
+  async generateProductPreviewStream(config: ProductPreviewConfig): Promise<import('sharp').Sharp> {
+    this.logger.log(`🎨 === GÉNÉRATION IMAGE (stream) ===`);
+    const { productBuffer, processedDesign, finalLeft, finalTop } =
+      await this._prepareComposite(config);
+
+    // Retourne le pipeline Sharp — pas de .toBuffer()
+    // Le caller pipe ce pipeline directement vers Cloudinary upload_stream
+    return sharp(productBuffer)
+      .composite([{ input: processedDesign, left: Math.round(finalLeft), top: Math.round(finalTop), blend: 'over' }])
+      .jpeg({ quality: 88, progressive: true, mozjpeg: false });
+  }
+
+  // ============================================================
+  // WRAPPERS PUBLICS
+  // ============================================================
+
   async generatePreviewFromJson(
     productImageUrl: string,
     designImageUrl: string,
@@ -789,36 +678,38 @@ export class ProductPreviewGeneratorService {
     showDelimitation = false,
     isSticker = false
   ): Promise<Buffer> {
-    this.logger.log(`🔍 DEBUG generatePreviewFromJson: isSticker = ${isSticker}`);
-
-    // Parser le JSON si c'est une string
-    const position = typeof positionJson === 'string'
-      ? JSON.parse(positionJson)
-      : positionJson;
-
-    // 🎯 LOGIQUE UNIFIÉE: Si delimitationWidth/Height ne sont pas fournis,
-    // on les calcule depuis la délimitation (mode compatibilité)
-    const delimitationWidth = position.delimitationWidth ?? delimitation.width;
-    const delimitationHeight = position.delimitationHeight ?? delimitation.height;
-
-    // Convertir le format de position au format attendu
-    const config: ProductPreviewConfig = {
-      productImageUrl,
-      designImageUrl,
-      delimitation,
+    const position = typeof positionJson === 'string' ? JSON.parse(positionJson) : positionJson;
+    return this.generateProductPreview({
+      productImageUrl, designImageUrl, delimitation,
       position: {
-        x: position.x || 0,
-        y: position.y || 0,
-        scale: position.scale || 0.8,
-        rotation: position.rotation || 0,
+        x: position.x || 0, y: position.y || 0,
+        scale: position.scale || 0.8, rotation: position.rotation || 0,
         positionUnit: position.positionUnit || 'PIXEL',
-        delimitationWidth,
-        delimitationHeight,
+        delimitationWidth: position.delimitationWidth ?? delimitation.width,
+        delimitationHeight: position.delimitationHeight ?? delimitation.height,
       },
-      showDelimitation,
-      isSticker
-    };
+      showDelimitation, isSticker
+    });
+  }
 
-    return this.generateProductPreview(config);
+  async generatePreviewStreamFromJson(
+    productImageUrl: string,
+    designImageUrl: string,
+    delimitation: Delimitation,
+    positionJson: any,
+    isSticker = false
+  ): Promise<import('sharp').Sharp> {
+    const position = typeof positionJson === 'string' ? JSON.parse(positionJson) : positionJson;
+    return this.generateProductPreviewStream({
+      productImageUrl, designImageUrl, delimitation,
+      position: {
+        x: position.x || 0, y: position.y || 0,
+        scale: position.scale || 0.8, rotation: position.rotation || 0,
+        positionUnit: position.positionUnit || 'PIXEL',
+        delimitationWidth: position.delimitationWidth ?? delimitation.width,
+        delimitationHeight: position.delimitationHeight ?? delimitation.height,
+      },
+      showDelimitation: false, isSticker
+    });
   }
 }

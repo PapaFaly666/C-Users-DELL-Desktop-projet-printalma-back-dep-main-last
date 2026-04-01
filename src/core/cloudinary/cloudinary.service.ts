@@ -659,6 +659,46 @@ export class CloudinaryService {
    * Upload an image to Cloudinary by fetching it from a remote URL.
    * Useful when the image is already hosted (e.g. after a mockup generation API returned an URL).
    */
+  /**
+   * Upload un pipeline Sharp directement vers Cloudinary via upload_stream.
+   * Aucun buffer intermédiaire — les données sont streamées pixel par pixel.
+   * @param pipeline - Instance Sharp prête à être pipée (ex: sharp(...).jpeg())
+   * @param options  - Options Cloudinary (folder, public_id, resource_type, etc.)
+   */
+  async uploadSharpPipeline(pipeline: import('sharp').Sharp, options: any = {}): Promise<CloudinaryUploadResult> {
+    return new Promise((resolve, reject) => {
+      try {
+        this.ensureConfigured();
+
+        const uploadConfig = {
+          folder: options.folder || 'printalma',
+          resource_type: (options.resource_type || 'image') as 'image',
+          public_id: options.public_id || `${Date.now()}`,
+          timeout: 120000,
+          ...options,
+        };
+
+        const uploadStream = cloudinary.uploader.upload_stream(
+          uploadConfig,
+          (error, result) => {
+            if (error) {
+              console.error('❌ Cloudinary uploadSharpPipeline error:', error);
+              const errorMessage = error?.message || error?.error?.message || JSON.stringify(error);
+              return reject(new Error(`Sharp pipeline upload failed: ${errorMessage}`));
+            }
+            resolve(result as CloudinaryUploadResult);
+          }
+        );
+
+        pipeline.pipe(uploadStream);
+      } catch (error) {
+        console.error('❌ Cloudinary uploadSharpPipeline unexpected error:', error);
+        const errorMessage = error?.message || String(error);
+        reject(new Error(`Sharp pipeline upload failed: ${errorMessage}`));
+      }
+    });
+  }
+
   async uploadFromUrl(imageUrl: string, options: any = {}): Promise<CloudinaryUploadResult> {
     return new Promise((resolve, reject) => {
       try {

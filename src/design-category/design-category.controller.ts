@@ -18,6 +18,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { multerConfig } from '../../multerConfig';
 import {
   ApiTags,
   ApiOperation,
@@ -75,7 +76,7 @@ export class DesignCategoryController {
    */
   @Post('admin')
   @UseGuards(JwtAuthGuard, AdminGuard)
-  @UseInterceptors(FileInterceptor('coverImage'))
+  @UseInterceptors(FileInterceptor('coverImage', multerConfig))
   @ApiBearerAuth()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
@@ -226,7 +227,7 @@ export class DesignCategoryController {
    */
   @Put('admin/:id')
   @UseGuards(JwtAuthGuard, AdminGuard)
-  @UseInterceptors(FileInterceptor('coverImage'))
+  @UseInterceptors(FileInterceptor('coverImage', multerConfig))
   @ApiBearerAuth()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
