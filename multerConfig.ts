@@ -1,4 +1,5 @@
 import { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
+import { BadRequestException } from '@nestjs/common';
 
 // Configuration pour les uploads d'images de design
 // Plus de validation de type ou de taille - accepter tous les fichiers
