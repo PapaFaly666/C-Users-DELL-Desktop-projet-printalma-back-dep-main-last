@@ -1307,6 +1307,15 @@ export class DesignService {
               firstName: true,
               lastName: true
             }
+          },
+          _count: {
+            select: {
+              vendorProducts: {
+                where: {
+                  isDelete: false
+                }
+              }
+            }
           }
         }
       }),
