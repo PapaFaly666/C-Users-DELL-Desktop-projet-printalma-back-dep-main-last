@@ -30,9 +30,9 @@ export class DesignService {
     // Validation du fichier
     this.validateFile(file);
 
-    // Traitement des tags
+    // Traitement des tags (tableau de chaînes)
     const tags = createDesignDto.tags
-      ? createDesignDto.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
+      ? createDesignDto.tags.map(tag => tag.trim()).filter(tag => tag.length > 0)
       : [];
 
     // Vérifier si le vendeur est un vendeur Printalma (validation automatique)
@@ -282,10 +282,10 @@ export class DesignService {
 
     // Traitement des tags si fournis
     const updateData: any = { ...updateDesignDto };
-    
+
     if (updateDesignDto.tags !== undefined) {
-      updateData.tags = updateDesignDto.tags 
-        ? updateDesignDto.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
+      updateData.tags = updateDesignDto.tags
+        ? updateDesignDto.tags.map(tag => tag.trim()).filter(tag => tag.length > 0)
         : [];
     }
 
