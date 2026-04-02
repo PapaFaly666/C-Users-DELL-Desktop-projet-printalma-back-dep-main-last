@@ -30,10 +30,19 @@ export class DesignService {
     // Validation du fichier
     this.validateFile(file);
 
-    // Traitement des tags (tableau de chaînes)
-    const tags = createDesignDto.tags
-      ? createDesignDto.tags.map(tag => tag.trim()).filter(tag => tag.length > 0)
-      : [];
+    // Traitement des tags (string JSON depuis FormData)
+    let tags: string[] = [];
+    if (createDesignDto.tags) {
+      try {
+        const parsed = JSON.parse(createDesignDto.tags);
+        tags = Array.isArray(parsed)
+          ? parsed.map(tag => String(tag).trim()).filter(tag => tag.length > 0)
+          : [];
+      } catch {
+        // Fallback: essayer de parser comme chaîne séparée par virgules
+        tags = createDesignDto.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
+      }
+    }
 
     // Vérifier si le vendeur est un vendeur Printalma (validation automatique)
     const vendor = await this.prisma.user.findUnique({
@@ -284,9 +293,17 @@ export class DesignService {
     const updateData: any = { ...updateDesignDto };
 
     if (updateDesignDto.tags !== undefined) {
-      updateData.tags = updateDesignDto.tags
-        ? updateDesignDto.tags.map(tag => tag.trim()).filter(tag => tag.length > 0)
-        : [];
+      let tags: string[];
+      try {
+        const parsed = JSON.parse(updateDesignDto.tags);
+        tags = Array.isArray(parsed)
+          ? parsed.map(tag => String(tag).trim()).filter(tag => tag.length > 0)
+          : [];
+      } catch {
+        // Fallback: essayer de parser comme chaîne séparée par virgules
+        tags = updateDesignDto.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
+      }
+      updateData.tags = tags;
     }
 
     if (updateDesignDto.categoryId) {

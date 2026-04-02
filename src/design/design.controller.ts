@@ -274,14 +274,14 @@ export class DesignController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Supprimer (soft delete) un design du vendeur' })
+  @ApiOperation({ summary: 'Supprimer un design du vendeur' })
   @ApiParam({ name: 'id', type: Number, description: 'ID du design' })
   async softDeleteDesign(
     @Request() req,
     @Param('id', ParseIntPipe) id: number
   ): Promise<{ success: boolean; message: string }> {
     await this.designService.deleteDesign(id, req.user.sub);
-    return { success: true, message: 'Design supprimé (soft delete)' };
+    return { success: true, message: 'Design supprimé avec succès' };
   }
 
   // Endpoint pour les statistiques globales (bonus)

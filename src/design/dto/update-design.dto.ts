@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString, MinLength, MaxLength, IsNumber, Min, Max, IsInt, IsArray, ArrayMaxSize } from 'class-validator';
+import { IsOptional, IsString, MinLength, MaxLength, IsNumber, Min, Max, IsInt } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export class UpdateDesignDto {
@@ -65,15 +65,11 @@ export class UpdateDesignDto {
   categoryId?: number;
 
   @ApiProperty({
-    description: 'Tags optionnels (tableau de chaînes)',
-    example: ['moderne', 'entreprise', 'tech'],
-    required: false,
-    type: 'array',
-    items: { type: 'string' }
+    description: 'Tags optionnels (JSON stringified array)',
+    example: '["moderne","entreprise","tech"]',
+    required: false
   })
   @IsOptional()
-  @IsArray({ message: 'Les tags doivent être un tableau' })
-  @IsString({ each: true, message: 'Chaque tag doit être une chaîne de caractères' })
-  @ArrayMaxSize(20, { message: 'Maximum 20 tags autorisés' })
-  tags?: string[];
+  @IsString()
+  tags?: string;
 } 
