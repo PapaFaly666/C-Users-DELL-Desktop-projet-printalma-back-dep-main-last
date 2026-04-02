@@ -208,7 +208,7 @@ export class DesignService {
         orderBy.createdAt = sortOrder;
     }
 
-    // Récupération des designs
+    // Récupération des designs avec count des produits vendeur
     const [designs, totalCount] = await Promise.all([
       this.prisma.design.findMany({
         where: { ...where, isDelete: false },
@@ -223,7 +223,16 @@ export class DesignService {
               lastName: true
             }
           },
-          category: true
+          category: true,
+          _count: {
+            select: {
+              vendorProducts: {
+                where: {
+                  isDelete: false
+                }
+              }
+            }
+          }
         }
       }),
       this.prisma.design.count({ where: { ...where, isDelete: false } })
@@ -487,6 +496,7 @@ export class DesignService {
       updatedAt: design.updatedAt.toISOString(),
       publishedAt: design.publishedAt ? design.publishedAt.toISOString() : undefined,
       vendor: vendorInfo,
+      vendorProductsCount: design._count?.vendorProducts || 0,
     };
   }
 

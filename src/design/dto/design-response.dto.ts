@@ -148,6 +148,9 @@ export class DesignResponseDto {
   // 🆕 Infos vendeur pour les admins lors de la validation
   @ApiProperty({ type: VendorInfoDto, nullable: true })
   vendor?: VendorInfoDto;
+
+  @ApiProperty({ example: 5, description: 'Nombre de produits vendeur qui utilisent ce design' })
+  vendorProductsCount?: number;
 }
 
 export class CreateDesignResponseDto {

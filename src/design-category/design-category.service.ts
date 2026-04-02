@@ -438,7 +438,7 @@ export class DesignCategoryService {
    * Supprimer une catégorie (soft delete)
    * Les designs liés seront mis en attente jusqu'à ce que le vendeur choisisse une nouvelle catégorie
    */
-  async deleteCategory(id: number): Promise<{ message: string; designsAffected: number }> {
+  async deleteCategory(id: number): Promise<{ message: string; designsAffected: number; vendorProductsAffected: number }> {
     try {
       const category = await this.prisma.designCategory.findUnique({
         where: { id },
@@ -457,6 +457,16 @@ export class DesignCategoryService {
 
       const designsCount = category._count.designs;
 
+      // Récupérer les IDs des designs qui vont être mis en attente
+      const designsToCheck = await this.prisma.design.findMany({
+        where: { categoryId: id },
+        select: { id: true },
+      });
+
+      const designIds = designsToCheck.map(d => d.id);
+
+      let vendorProductsAffected = 0;
+
       // Mettre tous les designs liés en attente (isPending = true, isValidated = false, isPublished = false)
       if (designsCount > 0) {
         await this.prisma.design.updateMany({
@@ -467,6 +477,33 @@ export class DesignCategoryService {
             isPublished: false,
           },
         });
+
+        // Mettre tous les VendorProducts qui utilisent ces designs en attente
+        if (designIds.length > 0) {
+          const vendorProductsResult = await this.prisma.vendorProduct.findMany({
+            where: {
+              designId: { in: designIds },
+              isDelete: false,
+            },
+            select: { id: true },
+          });
+
+          const vendorProductIds = vendorProductsResult.map(vp => vp.id);
+
+          if (vendorProductIds.length > 0) {
+            const result = await this.prisma.vendorProduct.updateMany({
+              where: {
+                id: { in: vendorProductIds },
+              },
+              data: {
+                status: 'PENDING',
+                isValidated: false,
+                adminValidated: false,
+              },
+            });
+            vendorProductsAffected = result.count;
+          }
+        }
       }
 
       // Supprimer l'image de couverture de Cloudinary si elle existe
@@ -486,9 +523,10 @@ export class DesignCategoryService {
 
       return {
         message: designsCount > 0
-          ? `Catégorie "${category.name}" supprimée. ${designsCount} design(s) mis(en) en attente de nouvelle catégorie.`
+          ? `Catégorie "${category.name}" supprimée. ${designsCount} design(s) mis(en) en attente de nouvelle catégorie${vendorProductsAffected > 0 ? `. ${vendorProductsAffected} produit(s) vendeur(s) également mis en attente.` : '.'}`
           : `Catégorie "${category.name}" supprimée avec succès`,
         designsAffected: designsCount,
+        vendorProductsAffected,
       };
     } catch (error) {
       console.error('Erreur lors de la suppression de la catégorie:', error);

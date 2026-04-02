@@ -270,18 +270,23 @@ export class DesignCategoryController {
       properties: {
         message: {
           type: 'string',
-          example: 'Catégorie "Logo Design" supprimée. 5 designs mis en attente de nouvelle catégorie.'
+          example: 'Catégorie "Logo Design" supprimée. 5 designs mis en attente de nouvelle catégorie. 10 produits vendeur également mis en attente.'
         },
         designsAffected: {
           type: 'number',
           example: 5,
           description: 'Nombre de designs concernés par la suppression'
         },
+        vendorProductsAffected: {
+          type: 'number',
+          example: 10,
+          description: 'Nombre de produits vendeur concernés par la suppression'
+        },
       },
     },
   })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Catégorie non trouvée' })
-  async deleteCategory(@Param('id', ParseIntPipe) id: number): Promise<{ message: string; designsAffected: number }> {
+  async deleteCategory(@Param('id', ParseIntPipe) id: number): Promise<{ message: string; designsAffected: number; vendorProductsAffected: number }> {
     return this.designCategoryService.deleteCategory(id);
   }
 
