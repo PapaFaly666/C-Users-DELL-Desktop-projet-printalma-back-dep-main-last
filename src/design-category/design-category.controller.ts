@@ -259,7 +259,7 @@ export class DesignCategoryController {
   @ApiBearerAuth()
   @ApiOperation({
     summary: '[ADMIN] Supprimer une catégorie',
-    description: 'Supprimer définitivement une catégorie. Impossible si des designs y sont associés.',
+    description: 'Supprimer une catégorie. Les designs liés seront mis en attente jusqu\'à ce que le vendeur choisisse une nouvelle catégorie.',
   })
   @ApiParam({ name: 'id', description: 'ID de la catégorie à supprimer' })
   @ApiResponse({
@@ -268,16 +268,20 @@ export class DesignCategoryController {
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: 'Catégorie "Logo Design" supprimée avec succès' },
+        message: {
+          type: 'string',
+          example: 'Catégorie "Logo Design" supprimée. 5 designs mis en attente de nouvelle catégorie.'
+        },
+        designsAffected: {
+          type: 'number',
+          example: 5,
+          description: 'Nombre de designs concernés par la suppression'
+        },
       },
     },
   })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Catégorie non trouvée' })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Impossible de supprimer une catégorie contenant des designs',
-  })
-  async deleteCategory(@Param('id', ParseIntPipe) id: number): Promise<{ message: string }> {
+  async deleteCategory(@Param('id', ParseIntPipe) id: number): Promise<{ message: string; designsAffected: number }> {
     return this.designCategoryService.deleteCategory(id);
   }
 

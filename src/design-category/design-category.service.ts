@@ -436,8 +436,9 @@ export class DesignCategoryService {
 
   /**
    * Supprimer une catégorie (soft delete)
+   * Les designs liés seront mis en attente jusqu'à ce que le vendeur choisisse une nouvelle catégorie
    */
-  async deleteCategory(id: number): Promise<{ message: string }> {
+  async deleteCategory(id: number): Promise<{ message: string; designsAffected: number }> {
     try {
       const category = await this.prisma.designCategory.findUnique({
         where: { id },
@@ -454,11 +455,18 @@ export class DesignCategoryService {
         throw new NotFoundException('Catégorie non trouvée');
       }
 
-      // Vérifier s'il y a des designs associés
-      if (category._count.designs > 0) {
-        throw new BadRequestException(
-          `Impossible de supprimer cette catégorie car elle contient ${category._count.designs} design(s). Veuillez d'abord déplacer ou supprimer les designs associés.`
-        );
+      const designsCount = category._count.designs;
+
+      // Mettre tous les designs liés en attente (isPending = true, isValidated = false, isPublished = false)
+      if (designsCount > 0) {
+        await this.prisma.design.updateMany({
+          where: { categoryId: id },
+          data: {
+            isPending: true,
+            isValidated: false,
+            isPublished: false,
+          },
+        });
       }
 
       // Supprimer l'image de couverture de Cloudinary si elle existe
@@ -477,11 +485,14 @@ export class DesignCategoryService {
       });
 
       return {
-        message: `Catégorie "${category.name}" supprimée avec succès`,
+        message: designsCount > 0
+          ? `Catégorie "${category.name}" supprimée. ${designsCount} design(s) mis(en) en attente de nouvelle catégorie.`
+          : `Catégorie "${category.name}" supprimée avec succès`,
+        designsAffected: designsCount,
       };
     } catch (error) {
       console.error('Erreur lors de la suppression de la catégorie:', error);
-      
+
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }

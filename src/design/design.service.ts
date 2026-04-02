@@ -318,8 +318,15 @@ export class DesignService {
       if (!category) {
         throw new BadRequestException('Catégorie non trouvée ou inactive');
       }
-      
+
       updateData.categoryId = updateDesignDto.categoryId;
+
+      // Si on change la catégorie d'un design qui était déjà validé, le remettre en validé
+      if (existingDesign.validatedAt) {
+        updateData.isValidated = true;
+        updateData.isPending = false;
+        updateData.isPublished = true;
+      }
     }
 
     // Mise à jour du design
